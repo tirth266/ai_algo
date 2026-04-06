@@ -21,7 +21,8 @@ import type {
   CombinedStrategyInfo
 } from '../types';
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+// Use environment variable, fallback to local dev server
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 // Create axios instance with base configuration
 const apiClient = axios.create({
