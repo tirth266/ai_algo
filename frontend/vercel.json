@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/angel-callback", "destination": "/angel-callback.html" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

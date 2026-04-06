@@ -1,0 +1,17 @@
+Flask==3.0.0
+Flask-CORS==4.0.0
+requests==2.31.0
+pandas==2.1.4
+numpy==1.26.2
+SQLAlchemy==2.0.23
+psycopg2-binary==2.9.9
+python-dotenv==1.0.0
+alembic==1.13.1
+gunicorn==21.2.0
+
+# Angel One SmartAPI
+smartapi-python==1.7.0
+pyotp==2.9.0
+
+# Zerodha Kite Connect (optional, for backward compatibility)
+kiteconnect==4.0.0

@@ -1,0 +1,6 @@
+﻿src/pages/BacktestingPage.tsx(3,16): error TS6133: 'Download' is declared but its value is never read.
+src/pages/BacktestingPage.tsx(37,10): error TS6133: 'equityCurve' is declared but its value is never read.
+src/pages/LogsPage.tsx(10,10): error TS6133: 'error' is declared but its value is never read.
+src/pages/OrdersPage.tsx(9,10): error TS6133: 'error' is declared but its value is never read.
+src/pages/PositionsPage.tsx(9,10): error TS6133: 'error' is declared but its value is never read.
+src/pages/StrategiesPage.tsx(9,10): error TS6133: 'error' is declared but its value is never read.

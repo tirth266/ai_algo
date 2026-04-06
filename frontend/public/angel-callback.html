@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Angel One Redirect Callback</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #111827;
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            background-color: #1f2937;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            max-width: 800px;
+            width: 100%;
+        }
+        h1 {
+            color: #10b981;
+            text-align: center;
+            margin-top: 0;
+        }
+        .instructions {
+            text-align: center;
+            margin-bottom: 2rem;
+            color: #d1d5db;
+        }
+        .token-group {
+            margin-bottom: 1.5rem;
+        }
+        .token-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #9ca3af;
+            font-weight: bold;
+        }
+        .token-container {
+            display: flex;
+            gap: 10px;
+        }
+        .token-box {
+            background-color: #111827;
+            padding: 0.75rem;
+            border-radius: 0.25rem;
+            flex-grow: 1;
+            font-family: monospace;
+            word-break: break-all;
+            border: 1px solid #374151;
+        }
+        button {
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            padding: 0.75rem 1rem;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            font-weight: bold;
+            flex-shrink: 0;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #2563eb;
+        }
+        button.copied {
+            background-color: #10b981;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Angel One Connected Successfully!</h1>
+        <p class="instructions">Copy these tokens and paste into your app.</p>
+        
+        <div class="token-group">
+            <label>Auth Token</label>
+            <div class="token-container">
+                <div id="authToken" class="token-box">Not provided</div>
+                <button onclick="copyToken('authToken', this)">Copy Token</button>
+            </div>
+        </div>
+        
+        <div class="token-group">
+            <label>Feed Token</label>
+            <div class="token-container">
+                <div id="feedToken" class="token-box">Not provided</div>
+                <button onclick="copyToken('feedToken', this)">Copy Token</button>
+            </div>
+        </div>
+        
+        <div class="token-group">
+            <label>Refresh Token</label>
+            <div class="token-container">
+                <div id="refreshToken" class="token-box">Not provided</div>
+                <button onclick="copyToken('refreshToken', this)">Copy Token</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Parse URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const authToken = urlParams.get('auth_token');
+        const feedToken = urlParams.get('feed_token');
+        const refreshToken = urlParams.get('refresh_token');
+
+        // Display tokens
+        if (authToken) {
+            document.getElementById('authToken').textContent = authToken;
+            localStorage.setItem('angel_one_auth_token', authToken);
+        }
+        if (feedToken) document.getElementById('feedToken').textContent = feedToken;
+        if (refreshToken) document.getElementById('refreshToken').textContent = refreshToken;
+
+        // Copy functionality
+        function copyToken(elementId, btnElement) {
+            const textToCopy = document.getElementById(elementId).textContent;
+            if (textToCopy === 'Not provided') return;
+
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const originalText = btnElement.textContent;
+                btnElement.textContent = 'Copied!';
+                btnElement.classList.add('copied');
+                
+                setTimeout(() => {
+                    btnElement.textContent = originalText;
+                    btnElement.classList.remove('copied');
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+                alert('Failed to copy token');
+            });
+        }
+    </script>
+</body>
+</html>
