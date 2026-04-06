@@ -62,7 +62,7 @@ export const useRealtimeData = (symbols: string[] = []) => {
     const initializeSocket = () => {
       try {
         // Connect to backend WebSocket server
-        const s = io(import.meta.env.VITE_API_URL || 'http://localhost:5000', {
+        const s = io(import.meta.env.VITE_API_URL || 'http://localhost:7000', {
           transports: ['websocket'],
           reconnectionAttempts: maxRetries,
           timeout: 10000
