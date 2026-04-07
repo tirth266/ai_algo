@@ -14,7 +14,7 @@ Date: April 7, 2026
 
 import pandas as pd
 import numpy as np
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import logging
 
 from .base_strategy import BaseStrategy
