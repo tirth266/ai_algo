@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { angelService, setAngelToken, removeAngelToken, getAngelToken } from '../services/angelApi';
+import { angelService, setAngelConnected, removeAngelConnected, getAngelConnected } from '../services/angelApi';
 import { Link2, Loader, CheckCircle, XCircle, LogOut, Key } from 'lucide-react';
 
 export const AngelOneCard: React.FC = () => {
@@ -8,8 +8,6 @@ export const AngelOneCard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   
-  const [clientCode, setClientCode] = useState('');
-  const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
 
   useEffect(() => {
@@ -18,14 +16,15 @@ export const AngelOneCard: React.FC = () => {
 
   const checkStatus = async () => {
     try {
-      const storedToken = getAngelToken();
-      if (storedToken) {
+      const storedConnected = getAngelConnected();
+      if (storedConnected) {
         setIsConnected(true);
       }
       
       const status = await angelService.getStatus();
       if (status.data?.authenticated) {
         setIsConnected(true);
+        setAngelConnected(true);
       }
     } catch (err) {
       console.error('Failed to check Angel One status:', err);
@@ -38,33 +37,25 @@ export const AngelOneCard: React.FC = () => {
     setError(null);
     setSuccessMessage(null);
 
-    if (!clientCode || !password || !totp) {
-      setError('Please fill in all fields');
+    if (!totp || totp.length !== 6) {
+      setError('Please enter a valid 6-digit OTP');
       setLoading(false);
       return;
     }
 
     try {
-      const result = await angelService.login({
-        client_code: clientCode,
-        password: password,
-        totp: totp,
-      });
+      const result = await angelService.login({ totp });
 
-      if (result.success) {
+      if (result.success || result.status === 'success') {
         setSuccessMessage('Connected to Angel One successfully!');
         setIsConnected(true);
-        if (result.data?.jwt_token) {
-          setAngelToken(result.data.jwt_token);
-        }
-        setClientCode('');
-        setPassword('');
+        setAngelConnected(true);
         setTotp('');
       } else {
-        setError(result.message || 'Login failed');
+        setError(result.message || 'Login failed. Please check your OTP.');
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to connect');
+      setError(err.response?.data?.message || 'Failed to connect. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -76,7 +67,7 @@ export const AngelOneCard: React.FC = () => {
 
     try {
       await angelService.logout();
-      removeAngelToken();
+      removeAngelConnected();
       setIsConnected(false);
       setSuccessMessage('Disconnected from Angel One');
     } catch (err: any) {
@@ -119,6 +110,10 @@ export const AngelOneCard: React.FC = () => {
                 <span>Broker:</span>
                 <span className="font-medium">Angel One SmartAPI</span>
               </div>
+              <div className="flex justify-between py-1">
+                <span>Status:</span>
+                <span className="text-profit-green">Session Active</span>
+              </div>
             </div>
           </div>
 
@@ -134,43 +129,21 @@ export const AngelOneCard: React.FC = () => {
       ) : (
         <form onSubmit={handleConnect} className="space-y-4">
           <div>
-            <label className="block text-sm text-gray-400 mb-2">Client ID</label>
-            <input
-              type="text"
-              value={clientCode}
-              onChange={(e) => setClientCode(e.target.value)}
-              placeholder="Enter Client ID"
-              className="w-full px-4 py-3 bg-trading-dark border border-trading-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-400 mb-2">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter Password"
-              className="w-full px-4 py-3 bg-trading-dark border border-trading-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-400 mb-2">TOTP Code</label>
+            <label className="block text-sm text-gray-400 mb-2">Enter OTP (6-digit)</label>
             <input
               type="text"
               value={totp}
               onChange={(e) => setTotp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              placeholder="Enter 6-digit TOTP"
+              placeholder="000000"
               maxLength={6}
-              className="w-full px-4 py-3 bg-trading-dark border border-trading-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
+              className="w-full px-4 py-4 bg-trading-dark border border-trading-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all text-center text-2xl tracking-widest font-mono"
             />
           </div>
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+            disabled={loading || totp.length !== 6}
+            className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (
               <>
@@ -184,6 +157,10 @@ export const AngelOneCard: React.FC = () => {
               </>
             )}
           </button>
+          
+          <p className="text-xs text-gray-500 text-center">
+            Enter the 6-digit OTP from your Authenticator app
+          </p>
         </form>
       )}
     </div>

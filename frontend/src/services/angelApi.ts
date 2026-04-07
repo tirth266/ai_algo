@@ -1,8 +1,6 @@
 import { API_BASE_URL } from './api';
 
 interface AngelLoginRequest {
-  client_code: string;
-  password: string;
   totp: string;
 }
 
@@ -10,8 +8,9 @@ interface AngelLoginResponse {
   status: string;
   message?: string;
   data?: {
-    jwt_token: string;
-    feed_token: string;
+    connected: boolean;
+    jwt_token?: string;
+    feed_token?: string;
   };
   success?: boolean;
 }
@@ -66,20 +65,16 @@ export const angelService = {
   },
 };
 
-export const ANGEL_STORAGE_KEY = 'angel_one_token';
+export const ANGEL_STORAGE_KEY = 'angel_one_connected';
 
-export const setAngelToken = (token: string) => {
-  localStorage.setItem(ANGEL_STORAGE_KEY, token);
+export const setAngelConnected = (connected: boolean) => {
+  localStorage.setItem(ANGEL_STORAGE_KEY, connected ? 'true' : 'false');
 };
 
-export const getAngelToken = (): string | null => {
-  return localStorage.getItem(ANGEL_STORAGE_KEY);
+export const getAngelConnected = (): boolean => {
+  return localStorage.getItem(ANGEL_STORAGE_KEY) === 'true';
 };
 
-export const removeAngelToken = () => {
+export const removeAngelConnected = () => {
   localStorage.removeItem(ANGEL_STORAGE_KEY);
-};
-
-export const isAngelConnected = (): boolean => {
-  return !!getAngelToken();
 };

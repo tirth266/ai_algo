@@ -32,34 +32,47 @@ def get_service():
 @angel_bp.route("/login", methods=["POST"])
 def angel_login():
     """
-    Login to Angel One with credentials.
+    Login to Angel One with stored credentials + OTP.
 
     Request Body:
         {
-            "client_code": "...",
-            "password": "...",
-            "totp": "..."
+            "totp": "123456"
         }
 
+    Credentials (client_code, password) are read from .env
+
     Returns:
-        JSON with login status and tokens
+        JSON with login status
     """
     try:
         data = request.get_json() or {}
-        client_code = data.get("client_code")
-        password = data.get("password")
         totp = data.get("totp")
 
-        if not all([client_code, password, totp]):
+        if not totp:
             return jsonify(
                 {
                     "status": "error",
-                    "message": "Missing required fields: client_code, password, totp",
+                    "message": "Missing required field: totp",
                     "success": False,
                 }
             ), 400
 
         service = get_service()
+
+        import os
+
+        client_code = os.getenv("ANGEL_ONE_CLIENT_ID")
+        password = os.getenv("ANGEL_ONE_PASSWORD")
+
+        if not client_code or not password:
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Server configuration missing. Contact admin.",
+                    "success": False,
+                }
+            ), 500
+
         result = service.login(client_code, password, totp)
 
         if result.get("success"):
@@ -67,10 +80,7 @@ def angel_login():
                 {
                     "status": "success",
                     "message": "Login successful",
-                    "data": {
-                        "jwt_token": result["data"].get("jwt_token"),
-                        "feed_token": result["data"].get("feed_token"),
-                    },
+                    "data": {"connected": True},
                 }
             ), 200
         else:
