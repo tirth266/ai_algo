@@ -18,6 +18,7 @@ import logging
 from ..strategies.master_strategy import MasterStrategy
 from ..core.trade_manager import TradeManager
 from ..core.indicators import calculate_atr, calculate_ema
+from ..core.safety_manager import SafetyManager
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,9 @@ class TradingSystem:
         max_open_positions: int = 2,
         enable_trailing: bool = True,
         trailing_method: str = "ATR",
+        daily_loss_limit_pct: float = 2.0,
+        max_trades_per_day: int = 5,
+        cooldown_minutes: int = 5,
     ):
         self.capital = capital
         self.risk_per_trade = risk_per_trade
@@ -51,6 +55,13 @@ class TradingSystem:
             max_open_positions=max_open_positions,
             enable_trailing=enable_trailing,
             trailing_method=trailing_method,
+        )
+
+        self.safety_manager = SafetyManager(
+            capital=capital,
+            daily_loss_limit_pct=daily_loss_limit_pct,
+            max_trades_per_day=max_trades_per_day,
+            cooldown_minutes=cooldown_minutes,
         )
 
         self.is_running = False
@@ -77,6 +88,15 @@ class TradingSystem:
 
     def open_trade(self, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
         """Open a new trade based on signal."""
+        # Check safety manager first
+        can_trade, reason = self.safety_manager.can_trade()
+        if not can_trade:
+            logger.warning(f"Trade blocked by Safety Manager: {reason}")
+            return None
+
+        # Check day reset
+        self.safety_manager.reset_daily()
+
         signal = self.generate_signal(data)
 
         if not signal:
@@ -122,6 +142,22 @@ class TradingSystem:
             if result["action"] != "NONE":
                 results.append(result)
 
+                # Register trade with safety manager
+                if result["action"] in [
+                    "STOP_LOSS",
+                    "PARTIAL_TP",
+                    "FULL_CLOSE",
+                    "MANUAL_CLOSE",
+                ]:
+                    pnl = result.get("realized_pnl", 0)
+                    is_winning = pnl > 0
+                    self.safety_manager.register_trade(pnl, is_winning)
+
+                    # Check safety after trade
+                    can_trade, reason = self.safety_manager.can_trade()
+                    if not can_trade:
+                        logger.warning(f"Safety check failed after trade: {reason}")
+
         return results
 
     def run_cycle(self, data: pd.DataFrame) -> Dict[str, Any]:
@@ -147,12 +183,15 @@ class TradingSystem:
 
     def get_status(self) -> Dict[str, Any]:
         """Get current system status."""
+        can_trade, reason = self.safety_manager.can_trade()
+
         return {
             "is_running": self.is_running,
             "capital": self.capital,
             "open_trades": self.trade_manager.get_open_trades(),
             "performance": self.trade_manager.get_performance(),
             "max_positions": self.max_open_positions,
+            "safety": self.safety_manager.get_status(),
         }
 
     def start(self):
