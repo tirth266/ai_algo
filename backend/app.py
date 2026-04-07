@@ -18,7 +18,21 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+CORS(
+    app,
+    resources={
+        r"/api/*": {
+            "origins": [
+                "https://ai-algo-ul1l.vercel.app",
+                "https://ai-algo-66d6.onrender.com",
+                "http://localhost:5173",
+                "http://localhost:3000",
+            ],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+        }
+    },
+)
 
 TRADING_MODE = os.environ.get("TRADING_MODE", "paper")
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:7000")
@@ -114,10 +128,34 @@ def root():
     return jsonify({"message": "Algo Trading API Running", "version": "1.0.0"})
 
 
+# Dashboard endpoint
+@app.route("/api/dashboard", methods=["GET"])
+def dashboard():
+    """Dashboard data endpoint."""
+    return jsonify(
+        {
+            "message": "Dashboard working",
+            "trading_mode": TRADING_MODE,
+            "system_initialized": _system_initialized,
+        }
+    ), 200
+
+
 # Health check for load balancers (lightweight)
 @app.route("/health")
 def health_alt():
-    return "ok", 200
+    return jsonify({"status": "ok"}), 200
+
+
+# Global error handlers
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Route not found", "status": "error"}), 404
+
+
+@app.errorhandler(500)
+def server_error(e):
+    return jsonify({"error": "Internal server error", "status": "error"}), 500
 
 
 @app.route("/api/trading/health")

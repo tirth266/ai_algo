@@ -9,8 +9,6 @@ interface AngelLoginResponse {
   message?: string;
   data?: {
     connected: boolean;
-    jwt_token?: string;
-    feed_token?: string;
   };
   success?: boolean;
 }
@@ -37,44 +35,64 @@ export const angelService = {
     return response.json();
   },
 
-  async autoLogin(): Promise<AngelLoginResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/angel/auto-login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-    return response.json();
-  },
-
   async getStatus(): Promise<AngelStatusResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/angel/status`);
-    return response.json();
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/angel/status`);
+      return response.json();
+    } catch (error) {
+      return {
+        status: 'error',
+        data: {
+          authenticated: false,
+          api_key_set: false,
+          client_id: null,
+          user_name: null,
+        },
+      };
+    }
   },
 
   async logout(): Promise<{ status: string; message?: string }> {
-    const response = await fetch(`${API_BASE_URL}/api/angel/logout`, {
-      method: 'POST',
-    });
-    return response.json();
-  },
-
-  async getProfile(): Promise<any> {
-    const response = await fetch(`${API_BASE_URL}/api/angel/profile`);
-    return response.json();
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/angel/logout`, {
+        method: 'POST',
+      });
+      return response.json();
+    } catch (error) {
+      return { status: 'success', message: 'Logged out locally' };
+    }
   },
 };
 
-export const ANGEL_STORAGE_KEY = 'angel_one_connected';
+const ANGEL_CONNECTED_KEY = 'angel_one_connected';
+const ANGEL_EXPIRY_KEY = 'angel_one_expiry';
 
-export const setAngelConnected = (connected: boolean) => {
-  localStorage.setItem(ANGEL_STORAGE_KEY, connected ? 'true' : 'false');
+export const setAngelConnected = (connected: boolean): void => {
+  localStorage.setItem(ANGEL_CONNECTED_KEY, connected ? 'true' : 'false');
 };
 
 export const getAngelConnected = (): boolean => {
-  return localStorage.getItem(ANGEL_STORAGE_KEY) === 'true';
+  return localStorage.getItem(ANGEL_CONNECTED_KEY) === 'true';
 };
 
-export const removeAngelConnected = () => {
-  localStorage.removeItem(ANGEL_STORAGE_KEY);
+export const removeAngelConnected = (): void => {
+  localStorage.removeItem(ANGEL_CONNECTED_KEY);
+  localStorage.removeItem(ANGEL_EXPIRY_KEY);
+};
+
+export const setSessionExpiry = (timestamp: number): void => {
+  localStorage.setItem(ANGEL_EXPIRY_KEY, timestamp.toString());
+};
+
+export const getSessionExpiry = (): number | null => {
+  const expiry = localStorage.getItem(ANGEL_EXPIRY_KEY);
+  return expiry ? parseInt(expiry, 10) : null;
+};
+
+export const isSessionValid = (): boolean => {
+  const connected = getAngelConnected();
+  const expiry = getSessionExpiry();
+  
+  if (!connected || !expiry) return false;
+  return Date.now() < expiry;
 };
