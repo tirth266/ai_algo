@@ -248,4 +248,56 @@ export const strategyService = {
   },
 };
 
+// ============================================================================
+// TRADING SYSTEM SERVICE
+// ============================================================================
+
+export const tradingSystemService = {
+  /**
+   * Get current trading system status
+   */
+  getStatus: async (): Promise<TradingSystemStatus> => {
+    const response = await apiClient.get<TradingSystemStatus>('/trading/status');
+    return response.data;
+  },
+
+  /**
+   * Start the trading system
+   */
+  start: async (): Promise<void> => {
+    await apiClient.post('/trading/start');
+  },
+
+  /**
+   * Stop the trading system
+   */
+  stop: async (): Promise<void> => {
+    await apiClient.post('/trading/stop');
+  },
+
+  /**
+   * Get active trades
+   */
+  getTrades: async (): Promise<ActiveTrade[]> => {
+    const response = await apiClient.get<ActiveTrade[]>('/trading/trades');
+    return response.data;
+  },
+
+  /**
+   * Get latest signals
+   */
+  getSignals: async (): Promise<TradeSignal[]> => {
+    const response = await apiClient.get<TradeSignal[]>('/trading/signals');
+    return response.data;
+  },
+
+  /**
+   * Get performance metrics
+   */
+  getPerformance: async (): Promise<TradePerformance> => {
+    const response = await apiClient.get<TradePerformance>('/trading/performance');
+    return response.data;
+  },
+};
+
 export default apiClient;

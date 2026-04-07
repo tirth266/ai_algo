@@ -14,6 +14,7 @@ import TradingPage from './pages/TradingPage';
 import { BacktestDashboard } from './pages/BacktestDashboard';
 import { LiveTradingPanel } from './pages/LiveTradingPanel';
 import { AngelOneCallback } from './pages/AngelOneCallback';
+import { TradingDashboard } from './pages/TradingDashboard';
 import { brokerService } from './services/api';
 import type { BrokerConnection } from './types';
 
@@ -45,6 +46,7 @@ function App() {
             <Route path="/backtest-dashboard" element={<BacktestDashboard />} />
             <Route path="/live-trading" element={<LiveTradingPanel />} />
             <Route path="/angel-callback" element={<AngelOneCallback />} />
+            <Route path="/trading-dashboard" element={<TradingDashboard />} />
           </Routes>
         </main>
       </div>

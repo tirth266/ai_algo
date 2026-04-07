@@ -1,4 +1,57 @@
 // ============================================================================
+// TRADING SYSTEM TYPES
+// ============================================================================
+
+export interface TradeSignal {
+  type: 'BUY' | 'SELL';
+  entry: number;
+  stop_loss: number;
+  take_profit: number[];
+  confidence: 'high' | 'medium' | 'low';
+  reason: string;
+}
+
+export interface ActiveTrade {
+  id: string;
+  symbol: string;
+  direction: 'BUY' | 'SELL';
+  entry_price: number;
+  quantity: number;
+  stop_loss: number;
+  current_stop_loss: number;
+  take_profit_1: number;
+  take_profit_2: number;
+  status: 'OPEN' | 'PARTIAL' | 'CLOSED';
+  entry_time: string;
+  confidence: string;
+  reason: string;
+  unrealized_pnl?: number;
+}
+
+export interface TradePerformance {
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number;
+  profit_factor: number;
+  max_drawdown: number;
+  total_pnl: number;
+  avg_win: number;
+  avg_loss: number;
+}
+
+export interface TradingSystemStatus {
+  is_running: boolean;
+  capital: number;
+  open_trades: number;
+  performance: TradePerformance;
+}
+
+export interface SystemControlRequest {
+  action: 'start' | 'stop';
+}
+
+// ============================================================================
 // TYPE DEFINITIONS
 // ============================================================================
 

@@ -9,7 +9,8 @@ import {
   FileStack,
   Cpu,
   Activity,
-  BarChart3
+  BarChart3,
+  LineChart
 } from 'lucide-react';
 
 const menuItems = [
@@ -22,6 +23,7 @@ const menuItems = [
   { path: '/broker', label: 'Broker Connection', icon: Link2 },
   { path: '/logs', label: 'Logs', icon: FileStack },
   { path: '/trading', label: 'Live Trading', icon: Activity },
+  { path: '/trading-dashboard', label: 'Trading Dashboard', icon: LineChart },
 ];
 
 export const Sidebar: React.FC = () => {
