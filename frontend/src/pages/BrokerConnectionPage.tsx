@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { brokerService, API_BASE_URL } from '../services/api';
 import type { BrokerConnection } from '../types';
 import { Link2, Loader, CheckCircle, XCircle, LogOut } from 'lucide-react';
+import { AngelOneCard } from '../components/AngelOneCard';
 
 export const BrokerConnectionPage: React.FC = () => {
   const [brokerStatus, setBrokerStatus] = useState<BrokerConnection | null>(null);
@@ -78,7 +79,7 @@ export const BrokerConnectionPage: React.FC = () => {
       {/* Page Header */}
       <div>
         <h1 className="text-2xl font-bold text-white">Broker Connection</h1>
-        <p className="text-gray-400 mt-1">Connect to Zerodha Kite Connect API</p>
+        <p className="text-gray-400 mt-1">Connect to Zerodha or Angel One</p>
       </div>
 
       {/* Success/Error Messages */}
@@ -97,7 +98,7 @@ export const BrokerConnectionPage: React.FC = () => {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Connection Status */}
+        {/* Zerodha Card */}
         <div className="bg-trading-card rounded-lg p-6 border border-trading-border">
           <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
             <Link2 size={20} />
@@ -172,8 +173,11 @@ export const BrokerConnectionPage: React.FC = () => {
           )}
         </div>
 
+        {/* Angel One Card */}
+        <AngelOneCard />
+
         {/* Instructions */}
-        <div className="space-y-6">
+        <div className="space-y-6 col-span-1 lg:col-span-2">
           <div className="bg-trading-card rounded-lg p-6 border border-trading-border">
             <h3 className="text-lg font-semibold text-white mb-4">How to Connect</h3>
             <ol className="space-y-3 text-sm text-gray-400">
