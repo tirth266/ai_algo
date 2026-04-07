@@ -20,6 +20,8 @@ from ..core.trade_manager import TradeManager
 from ..core.indicators import calculate_atr, calculate_ema
 from ..core.safety_manager import SafetyManager
 from ..core.order_validator import OrderValidator
+from ..core.trade_logger import TradeLogger
+from ..analytics.performance import PerformanceAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,9 @@ class TradingSystem:
             max_open_positions=max_open_positions,
             max_slippage_pct=max_slippage_pct,
         )
+
+        self.trade_logger = TradeLogger()
+        self.performance_analyzer = PerformanceAnalyzer()
 
         self.is_running = False
         self.last_candle_time = None
@@ -177,6 +182,43 @@ class TradingSystem:
                     pnl = result.get("realized_pnl", 0)
                     is_winning = pnl > 0
                     self.safety_manager.register_trade(pnl, is_winning)
+
+                    # Log trade
+                    trade = self.trade_manager.closed_trades[-1]
+                    self.trade_logger.log_trade(
+                        {
+                            "id": trade.id,
+                            "symbol": trade.symbol,
+                            "direction": trade.direction,
+                            "entry_price": trade.entry_price,
+                            "exit_price": result.get("exit_price", 0),
+                            "quantity": trade.quantity,
+                            "stop_loss": trade.stop_loss,
+                            "take_profit_1": trade.take_profit_1,
+                            "take_profit_2": trade.take_profit_2,
+                            "pnl": pnl,
+                            "fees": 40,  # Default brokerage
+                            "slippage": 0,
+                            "entry_time": trade.entry_time.isoformat()
+                            if hasattr(trade.entry_time, "isoformat")
+                            else str(trade.entry_time),
+                            "exit_time": datetime.now().isoformat(),
+                            "exit_reason": result.get("action", ""),
+                        }
+                    )
+
+                    # Log signal as executed
+                    self.trade_logger.log_signal(
+                        {
+                            "symbol": trade.symbol,
+                            "type": trade.direction,
+                            "entry": trade.entry_price,
+                            "stop_loss": trade.stop_loss,
+                            "take_profit": [trade.take_profit_1, trade.take_profit_2],
+                            "reason": trade.reason,
+                            "executed": True,
+                        }
+                    )
 
                     # Check safety after trade
                     can_trade, reason = self.safety_manager.can_trade()

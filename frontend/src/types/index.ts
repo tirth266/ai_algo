@@ -202,3 +202,103 @@ export interface StrategyStats {
   registered: number;
   stopped: number;
 }
+
+// ============================================================================
+// JOURNAL TYPES - Trade Logging and Analytics
+// ============================================================================
+
+export interface TradeLog {
+  trade_id: string;
+  symbol: string;
+  direction: 'BUY' | 'SELL';
+  entry_price: number;
+  exit_price: number | null;
+  quantity: number;
+  stop_loss: number | null;
+  take_profit: number | null;
+  pnl: number;
+  fees: number;
+  slippage: number;
+  entry_time: string;
+  exit_time: string | null;
+  result: 'WIN' | 'LOSS' | 'BREAKEVEN';
+  strategy: string;
+  duration_minutes: number;
+}
+
+export interface SignalLog {
+  signal_id: string;
+  timestamp: string;
+  symbol: string;
+  signal_type: string;
+  entry: number | null;
+  stop_loss: number | null;
+  take_profit: number | null;
+  reason: string;
+  executed: boolean;
+  execution_price: number | null;
+  strategy: string;
+  confidence: number;
+  market_condition: string;
+}
+
+export interface PerformanceMetrics {
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number;
+  loss_rate: number;
+  total_pnl: number;
+  avg_win: number;
+  avg_loss: number;
+  gross_profit: number;
+  gross_loss: number;
+  profit_factor: number;
+  expectancy: number;
+  largest_win: number;
+  largest_loss: number;
+  avg_trade_duration: number;
+  best_day: string;
+  worst_day: string;
+}
+
+export interface EquityPoint {
+  timestamp: string;
+  equity: number;
+  drawdown: number;
+  open_positions: number;
+}
+
+export interface StrategyPerformance {
+  trades: number;
+  wins: number;
+  losses: number;
+  pnl: number;
+  win_rate: number;
+  avg_pnl: number;
+}
+
+export interface DailySummary {
+  date: string;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number;
+  total_pnl: number;
+  avg_pnl: number;
+}
+
+export interface SignalStats {
+  total_signals: number;
+  executed: number;
+  rejected: number;
+  execution_rate: number;
+  rejection_reasons: Record<string, number>;
+}
+
+export interface JournalAnalytics {
+  performance: PerformanceMetrics;
+  equity_curve: EquityPoint[];
+  strategy_performance: Record<string, StrategyPerformance>;
+  generated_at: string;
+}

@@ -300,4 +300,61 @@ export const tradingSystemService = {
   },
 };
 
+// ============================================================================
+// JOURNAL SERVICE - Trade Logging and Analytics
+// ============================================================================
+
+export const journalService = {
+  getTrades: async (params?: {
+    limit?: number;
+    symbol?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<{ trades: any[]; count: number }> => {
+    const response = await apiClient.get('/trading/logs', { params });
+    return response.data;
+  },
+
+  getSignals: async (params?: {
+    limit?: number;
+    symbol?: string;
+    executed?: boolean;
+    strategy?: string;
+  }): Promise<{ signals: any[]; count: number }> => {
+    const response = await apiClient.get('/trading/signals', { params });
+    return response.data;
+  },
+
+  getAnalytics: async (): Promise<any> => {
+    const response = await apiClient.get('/trading/analytics');
+    return response.data;
+  },
+
+  getEquityCurve: async (limit?: number): Promise<{ equity_curve: any[]; count: number }> => {
+    const params = limit ? { limit } : {};
+    const response = await apiClient.get('/trading/equity-curve', { params });
+    return response.data;
+  },
+
+  getStrategyPerformance: async (): Promise<{ strategies: any }> => {
+    const response = await apiClient.get('/trading/strategy-performance');
+    return response.data;
+  },
+
+  getDailySummary: async (date?: string): Promise<{ summary: any }> => {
+    const params = date ? { date } : {};
+    const response = await apiClient.get('/trading/daily-summary', { params });
+    return response.data;
+  },
+
+  getSignalStats: async (): Promise<{ stats: any }> => {
+    const response = await apiClient.get('/trading/signal-stats');
+    return response.data;
+  },
+
+  clearLogs: async (confirm: boolean = false): Promise<void> => {
+    await apiClient.post('/trading/clear-logs', { confirm });
+  },
+};
+
 export default apiClient;

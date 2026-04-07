@@ -10,7 +10,8 @@ import {
   Cpu,
   Activity,
   BarChart3,
-  LineChart
+  LineChart,
+  BookOpen
 } from 'lucide-react';
 
 const menuItems = [
@@ -22,6 +23,7 @@ const menuItems = [
   { path: '/backtest', label: 'Backtesting', icon: BarChart3 },
   { path: '/broker', label: 'Broker Connection', icon: Link2 },
   { path: '/logs', label: 'Logs', icon: FileStack },
+  { path: '/journal', label: 'Trade Journal', icon: BookOpen },
   { path: '/trading', label: 'Live Trading', icon: Activity },
   { path: '/trading-dashboard', label: 'Trading Dashboard', icon: LineChart },
 ];

@@ -17,6 +17,7 @@ import { AngelOneCallback } from './pages/AngelOneCallback';
 import { TradingDashboard } from './pages/TradingDashboard';
 import { brokerService } from './services/api';
 import type { BrokerConnection } from './types';
+import { JournalPage } from './pages/JournalPage';
 
 function App() {
   const [brokerStatus, setBrokerStatus] = useState<BrokerConnection | null>(null);
@@ -47,6 +48,7 @@ function App() {
             <Route path="/live-trading" element={<LiveTradingPanel />} />
             <Route path="/angel-callback" element={<AngelOneCallback />} />
             <Route path="/trading-dashboard" element={<TradingDashboard />} />
+            <Route path="/journal" element={<JournalPage />} />
           </Routes>
         </main>
       </div>

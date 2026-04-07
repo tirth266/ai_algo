@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "/angel-callback", "destination": "/angel-callback.html" },
+    { "source": "/api/(.*)", "destination": "https://ai-algo-63ii.onrender.com/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
