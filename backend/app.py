@@ -59,7 +59,7 @@ try:
     app.register_blueprint(broker_bp)
     logger.info("Registered broker_routes")
 except Exception as e:
-    logger.warning(f"Could not register broker_routes: {e}")
+    logger.error(f"Could NOT register broker_routes: {e}")
 
 try:
     from backend.api.trading_routes import trading_bp
@@ -67,7 +67,7 @@ try:
     app.register_blueprint(trading_bp)
     logger.info("Registered trading_routes")
 except Exception as e:
-    logger.warning(f"Could not register trading_routes: {e}")
+    logger.error(f"Could NOT register trading_routes: {e}")
 
 try:
     from backend.backtest.backtest_routes import backtest_bp
@@ -75,7 +75,7 @@ try:
     app.register_blueprint(backtest_bp)
     logger.info("Registered backtest_routes")
 except Exception as e:
-    logger.warning(f"Could not register backtest_routes: {e}")
+    logger.error(f"Could NOT register backtest_routes: {e}")
 
 try:
     from backend.engine.strategy_routes import strategy_bp
@@ -83,7 +83,7 @@ try:
     app.register_blueprint(strategy_bp)
     logger.info("Registered strategy_routes")
 except Exception as e:
-    logger.warning(f"Could not register strategy_routes: {e}")
+    logger.error(f"Could NOT register strategy_routes: {e}")
 
 try:
     from backend.api.journal_routes import journal_bp
@@ -91,7 +91,7 @@ try:
     app.register_blueprint(journal_bp)
     logger.info("Registered journal_routes")
 except Exception as e:
-    logger.warning(f"Could not register journal_routes: {e}")
+    logger.error(f"Could NOT register journal_routes: {e}")
 
 
 # Health check endpoint
