@@ -19,6 +19,7 @@ from ..strategies.master_strategy import MasterStrategy
 from ..core.trade_manager import TradeManager
 from ..core.indicators import calculate_atr, calculate_ema
 from ..core.safety_manager import SafetyManager
+from ..core.order_validator import OrderValidator
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class TradingSystem:
         daily_loss_limit_pct: float = 2.0,
         max_trades_per_day: int = 5,
         cooldown_minutes: int = 5,
+        max_slippage_pct: float = 0.5,
     ):
         self.capital = capital
         self.risk_per_trade = risk_per_trade
@@ -62,6 +64,11 @@ class TradingSystem:
             daily_loss_limit_pct=daily_loss_limit_pct,
             max_trades_per_day=max_trades_per_day,
             cooldown_minutes=cooldown_minutes,
+        )
+
+        self.order_validator = OrderValidator(
+            max_open_positions=max_open_positions,
+            max_slippage_pct=max_slippage_pct,
         )
 
         self.is_running = False
@@ -100,6 +107,24 @@ class TradingSystem:
         signal = self.generate_signal(data)
 
         if not signal:
+            return None
+
+        current_price = data["close"].iloc[-1]
+
+        # Validate order before execution
+        open_trades_list = self.trade_manager.get_open_trades()
+        validation = self.order_validator.validate_order(
+            symbol=self.strategy.name,
+            direction=signal["type"],
+            entry_price=signal["entry"],
+            current_price=current_price,
+            quantity=100,  # Default quantity
+            capital=self.capital,
+            open_trades=open_trades_list,
+        )
+
+        if not validation["valid"]:
+            logger.warning(f"Order validation FAILED: {validation['reason']}")
             return None
 
         if len(self.trade_manager.open_trades) >= self.max_open_positions:
