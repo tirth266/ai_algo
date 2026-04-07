@@ -20,6 +20,9 @@ from datetime import datetime
 from enum import Enum
 import logging
 
+from ..core.realistic_execution import RealisticExecutor
+from ..config.execution_config import get_execution_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -123,6 +126,16 @@ class TradeManager:
         self.ema_period = ema_period
         self.atr_multiplier = atr_multiplier
         self.breakeven_at_tp1 = breakeven_at_tp1
+
+        # Load execution config
+        exec_config = get_execution_config()
+        self.executor = RealisticExecutor(
+            slippage_pct=exec_config.slippage_pct,
+            fee_pct=exec_config.fee_pct,
+            spread_pct=exec_config.spread_pct,
+            sl_priority=exec_config.sl_priority,
+            log_adjustments=exec_config.log_adjustments,
+        )
 
         self.open_trades: Dict[str, Trade] = {}
         self.closed_trades: List[Trade] = []
