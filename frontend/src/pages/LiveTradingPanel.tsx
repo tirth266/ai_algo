@@ -485,7 +485,7 @@ export const LiveTradingPanel: React.FC = () => {
           </button>
           
           <button
-            onClick={() => window.open('http://localhost:5000/logs', '_blank')}
+            onClick={() => window.open('https://ai-algo-66d6.onrender.com/logs', '_blank')}
             className="px-4 py-3 bg-trading-dark text-gray-400 rounded-lg hover:text-white transition-colors"
           >
             View Logs

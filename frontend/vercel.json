@@ -1,7 +1,9 @@
 {
   "rewrites": [
     { "source": "/angel-callback", "destination": "/angel-callback.html" },
-    { "source": "/api/(.*)", "destination": "https://ai-algo-63ii.onrender.com/api/$1" },
+    { "source": "/api/(.*)", "destination": "https://ai-algo-66d6.onrender.com/api/$1" },
+    { "source": "/run-bot", "destination": "https://ai-algo-66d6.onrender.com/run-bot" },
+    { "source": "/health", "destination": "https://ai-algo-66d6.onrender.com/health" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
