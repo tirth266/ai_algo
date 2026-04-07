@@ -93,6 +93,14 @@ try:
 except Exception as e:
     logger.error(f"Could NOT register journal_routes: {e}")
 
+try:
+    from backend.api.angel_routes import angel_bp
+
+    app.register_blueprint(angel_bp)
+    logger.info("Registered angel_routes")
+except Exception as e:
+    logger.error(f"Could NOT register angel_routes: {e}")
+
 
 # Health check endpoint
 @app.route("/healthz")
