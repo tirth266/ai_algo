@@ -22,7 +22,7 @@ try:
 except ImportError:
     SmartConnect = None
 
-from backend.services.token_manager import TokenManager
+from services.token_manager import TokenManager
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,6 @@ class AngelOneService:
             self.feed_token = self.token_manager.feed_token
 
         return result
-
 
     def get_valid_token(self) -> str:
         """Return a valid JWT token, refreshing or logging in automatically if needed."""

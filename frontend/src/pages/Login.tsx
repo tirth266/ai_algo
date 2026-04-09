@@ -2,7 +2,7 @@ import React from 'react';
 
 export const Login: React.FC = () => {
   const apiKey = (import.meta as any).env?.VITE_ANGEL_ONE_API_KEY || "LFHr3Azz";
-  const redirectUrl = (import.meta as any).env?.VITE_ANGEL_REDIRECT_URL || "http://localhost:3000/angel-callback";
+  const redirectUrl = (import.meta as any).env?.VITE_ANGEL_REDIRECT_URL || `${(import.meta as any).env?.VITE_APP_URL}/angel-callback`;
   const encodedRedirect = encodeURIComponent(redirectUrl);
   
   const angelOnePublisherUrl = `https://smartapi.angelone.in/publisher-login?api_key=${apiKey}&redirect_url=${encodedRedirect}`;

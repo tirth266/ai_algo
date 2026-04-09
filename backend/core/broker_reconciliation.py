@@ -22,10 +22,10 @@ from dataclasses import dataclass, asdict
 
 from sqlalchemy.orm import Session
 
-from ..models.position import Position as PositionModel
-from ..models.trade import Trade as TradeModel
-from ..database.models import SessionLocal
-from ..core.position_persistence import PositionPersistence
+from models.position import Position as PositionModel
+from models.trade import Trade as TradeModel
+from database.models import SessionLocal
+from core.position_persistence import PositionPersistence
 
 logger = logging.getLogger(__name__)
 

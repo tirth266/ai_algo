@@ -24,7 +24,7 @@ export const LiveWatchlist: React.FC = () => {
     // Poll the /api/prices endpoint every 1 second
     const interval = setInterval(async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/prices`);
+        const response = await fetch(`${API_BASE_URL}/prices`);
         if (response.ok) {
           const freshPrices: PriceData = await response.json();
           

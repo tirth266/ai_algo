@@ -23,9 +23,9 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
-from ..models.trade import Trade as TradeModel
-from ..models.position import Position as PositionModel
-from ..database.models import SessionLocal
+from models.trade import Trade as TradeModel
+from models.position import Position as PositionModel
+from database.models import SessionLocal
 
 logger = logging.getLogger(__name__)
 

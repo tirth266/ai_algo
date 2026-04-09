@@ -16,188 +16,126 @@ from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 import logging
 
-from ..strategies.master_strategy import MasterStrategy
-from ..core.trade_manager import TradeManager
-from ..core.indicators import calculate_atr, calculate_ema
-from ..core.risk_engine import RiskEngine, TradeRequest
-from ..core.order_validator import OrderValidator
-from ..core.nse_order_validator import validate_nse_order
-from ..core.trade_logger import TradeLogger
-from ..core.realistic_execution import RealisticExecutor
-from ..analytics.performance import PerformanceAnalyzer
-from ..services.angel_service import get_angel_service, OrderRequest, ApiStatus
-from ..services.market_data import get_market_data_service
+from strategies.master_strategy import MasterStrategy
+from core.trade_manager import TradeManager
+from core.indicators import calculate_atr, calculate_ema
+from core.risk_engine import RiskEngine, TradeRequest
+from core.order_validator import OrderValidator
+from core.nse_order_validator import validate_nse_order
+from core.trade_logger import TradeLogger
+from core.realistic_execution import RealisticExecutor
+from analytics.performance import PerformanceAnalyzer
+from services.angel_service import get_angel_service, OrderRequest, ApiStatus
+from services.market_data import get_market_data_service
+from core.broker_reconciliation import BrokerReconciliation
+from services.angelone_service import AngelOneService
 
 logger = logging.getLogger(__name__)
 
 
 class TradingSystem:
-    """
-    Production Trading System.
-
-    Integrates:
-    - Signal generation (MasterStrategy)
-    - Trade execution (TradeManager)
-    - Real-time updates
-    """
+    """Main trading system that integrates strategy, risk, and execution."""
 
     def __init__(
         self,
         capital: float = 100000.0,
         risk_per_trade: float = 0.02,
-        max_open_positions: int = 2,
+        max_open_positions: int = 3,
         enable_trailing: bool = True,
-        trailing_method: str = "ATR",
-        daily_loss_limit_pct: float = 2.0,
-        max_trades_per_day: int = 5,
-        cooldown_minutes: int = 5,
-        max_slippage_pct: float = 0.5,
-        enable_live_trading: bool = False,  # Live trading via AngelService
+        enable_live_trading: bool = False,
     ):
         self.capital = capital
         self.risk_per_trade = risk_per_trade
         self.max_open_positions = max_open_positions
+        self.enable_trailing = enable_trailing
         self.enable_live_trading = enable_live_trading
+        self.is_running = False
+        self.broker_orders: Dict[str, str] = {}
+        self.trading_allowed = True
+        self.reconciliation_status: Dict[str, Any] = {}
 
-        self.strategy = MasterStrategy(capital=capital)
-        self.trade_manager = TradeManager(
-            capital=capital,
-            risk_per_trade=risk_per_trade,
-            max_open_positions=max_open_positions,
-            enable_trailing=enable_trailing,
-            trailing_method=trailing_method,
-        )
-
-        self.risk_engine = RiskEngine(
-            capital=capital,
-            max_risk_per_trade=risk_per_trade,
-            max_daily_loss_pct=daily_loss_limit_pct
-            / 100.0,  # Convert percentage to fraction
-            max_open_positions=max_open_positions,
-            max_trades_per_day=max_trades_per_day,
-            cooldown_minutes=cooldown_minutes,
-        )
-
-        self.order_validator = OrderValidator(
-            max_open_positions=max_open_positions,
-            max_slippage_pct=max_slippage_pct,
-        )
-
+        self.strategy = MasterStrategy()
+        self.trade_manager = TradeManager(capital=capital, risk_per_trade=risk_per_trade)
+        self.risk_engine = RiskEngine()
+        self.order_validator = OrderValidator()
+        self.execution_engine = RealisticExecutor()
         self.trade_logger = TradeLogger()
         self.performance_analyzer = PerformanceAnalyzer()
-        self.execution_engine = RealisticExecutor()
 
-        self.is_running = False
-        self.last_candle_time = None
-        
-        # Live trading state
-        self.broker_service = get_angel_service() if enable_live_trading else None
-        self.broker_orders: Dict[str, str] = {}  # Maps trade_id -> broker_order_id
-        
-        # Reconciliation state
-        self.reconciliation_status: Dict[str, Any] = {}
-        self.trading_allowed = True  # Default to True, set by reconciliation
+        # Broker service for live trading
+        self.broker_service = None
+        if enable_live_trading:
+            try:
+                self.broker_service = get_angel_service()
+            except Exception as e:
+                logger.warning(f"Could not initialize broker service: {e}")
 
-        logger.info(
-            f"TradingSystem initialized: capital={capital}, "
-            f"live_trading={'ENABLED' if enable_live_trading else 'DISABLED'}"
-        )
-        
-        # Restore persisted state from database on startup
-        self._restore_state_from_database()
+        # Run startup broker reconciliation
+        self._run_broker_reconciliation()
 
-    def _restore_state_from_database(self) -> None:
-        """
-        Restore trading state from persistent storage on startup.
-        
-        This ensures no positions or trades are lost on system restart.
-        Includes broker reconciliation to sync with broker's authoritative state.
-        """
-        logger.info("Restoring trading state from database...")
-        
+    def _run_broker_reconciliation(self) -> None:
+        """Run broker reconciliation on startup to sync local state with broker."""
         try:
-            # Load positions into RiskEngine
-            positions_loaded = self.risk_engine.load_positions_from_database()
-            
-            # Load trades into TradeManager
-            trades_loaded = self.trade_manager.load_trades_from_database()
-            
-            if positions_loaded > 0 or trades_loaded > 0:
-                logger.info(
-                    f"State restoration complete: "
-                    f"{positions_loaded} positions, {trades_loaded} trades"
-                )
-            else:
-                logger.info("No persisted state found - starting fresh")
-            
-            # Reconcile with broker to ensure system matches broker state
-            self._reconcile_with_broker()
-                
-        except Exception as e:
-            logger.error(f"Error restoring state from database: {str(e)}")
-            logger.warning("Continuing with empty state - may lose positions on next restart!")
-
-    def _reconcile_with_broker(self) -> None:
-        """
-        Reconcile system state with broker's authoritative positions.
-        
-        This ensures that after restart:
-        1. Any positions lost from local DB but present on broker are restored
-        2. Any orphaned local positions (not on broker) are closed
-        3. Any quantity/price mismatches are corrected
-        
-        Fail-safe: If reconciliation fails, sets flag to prevent trading until fixed.
-        """
-        try:
-            from ..core.broker_reconciliation import BrokerReconciliation
-            from ..services.angelone_service import AngelOneService
-            
             logger.info("Starting broker reconciliation...")
-            
+
             # Initialize broker service
             try:
                 broker_service = AngelOneService()
             except Exception as e:
-                logger.warning(f"Could not initialize broker service: {str(e)} - skipping reconciliation")
-                self.trading_allowed = True  # Allow trading even if broker service unavailable
+                logger.warning(
+                    f"Could not initialize broker service: {str(e)} - skipping reconciliation"
+                )
+                self.trading_allowed = (
+                    True  # Allow trading even if broker service unavailable
+                )
                 return
-            
+
             # Perform reconciliation
             with BrokerReconciliation(broker_service=broker_service) as reconciliation:
                 report = reconciliation.reconcile()
-                
+
                 # Store reconciliation state
                 self.reconciliation_status = report
-                self.trading_allowed = report.get('trading_allowed', False)
-                
+                self.trading_allowed = report.get("trading_allowed", False)
+
                 # Log reconciliation results
                 logger.info(f"Broker reconciliation: {report['status']}")
                 logger.info(f"Trading allowed: {self.trading_allowed}")
-                
-                if report.get('critical_error'):
-                    logger.error("CRITICAL: Broker reconciliation failed - TRADING BLOCKED")
+
+                if report.get("critical_error"):
+                    logger.error(
+                        "CRITICAL: Broker reconciliation failed - TRADING BLOCKED"
+                    )
                     logger.error(f"Error details: {report.get('message')}")
-                elif report.get('discrepancies_found'):
-                    logger.warning(f"Broker reconciliation: {len(report.get('actions', []))} corrections applied")
+                elif report.get("discrepancies_found"):
+                    logger.warning(
+                        f"Broker reconciliation: {len(report.get('actions', []))} corrections applied"
+                    )
                     # Log each action
-                    for action in report.get('actions', []):
-                        if action.get('severity') == 'error':
-                            logger.error(f"  {action['action_type']}: {action['symbol']} - {action['description']}")
+                    for action in report.get("actions", []):
+                        if action.get("severity") == "error":
+                            logger.error(
+                                f"  {action['action_type']}: {action['symbol']} - {action['description']}"
+                            )
                         else:
-                            logger.warning(f"  {action['action_type']}: {action['symbol']} - {action['description']}")
+                            logger.warning(
+                                f"  {action['action_type']}: {action['symbol']} - {action['description']}"
+                            )
                 else:
                     logger.info("Broker reconciliation: System matches broker state")
-                
+
         except ImportError:
-            logger.warning("BrokerReconciliation module not available - skipping reconciliation")
+            logger.warning(
+                "BrokerReconciliation module not available - skipping reconciliation"
+            )
             self.trading_allowed = True
         except Exception as e:
             logger.error(f"Broker reconciliation error: {str(e)}", exc_info=True)
             self.trading_allowed = False  # Fail-safe: block trading
             self.reconciliation_status = {
-                'status': 'failed',
-                'message': str(e),
-                'trading_allowed': False
+                "status": "failed",
+                "message": str(e),
+                "trading_allowed": False,
             }
 
     def generate_signal(self, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
@@ -221,11 +159,11 @@ class TradingSystem:
         """Open a new trade based on signal using a modular paper-trading pipeline."""
         # Safeguard: Prevent trading on stale data
         mds = get_market_data_service()
-        strategy_timeframe = getattr(self.strategy, 'timeframe', '5m')
-        
+        strategy_timeframe = getattr(self.strategy, "timeframe", "5m")
+
         # Check primary symbol
-        primary_symbol = self.strategy.name if hasattr(self.strategy, 'name') else None
-        
+        primary_symbol = self.strategy.name if hasattr(self.strategy, "name") else None
+
         if primary_symbol and mds.is_data_stale(primary_symbol, strategy_timeframe):
             cache_age = mds.get_cache_age(primary_symbol, strategy_timeframe)
             logger.error(
@@ -234,7 +172,7 @@ class TradingSystem:
                 f"Waiting for fresh data..."
             )
             return None
-        
+
         if not self.trading_allowed:
             logger.error(
                 "TRADING BLOCKED: Broker reconciliation failed. "
@@ -257,7 +195,9 @@ class TradingSystem:
 
         duplicate_result = self._check_duplicate_position(trade_request.symbol)
         if duplicate_result["duplicate"]:
-            logger.warning(f"Trade blocked by duplicate position: {duplicate_result['reason']}")
+            logger.warning(
+                f"Trade blocked by duplicate position: {duplicate_result['reason']}"
+            )
             return None
 
         order_validation = self._validate_order(
@@ -277,7 +217,9 @@ class TradingSystem:
             order_type=trade_request.direction,
         )
         if not nse_validation.get("valid", False):
-            logger.warning(f"NSE order validation FAILED: {nse_validation.get('message', 'Unknown error')}")
+            logger.warning(
+                f"NSE order validation FAILED: {nse_validation.get('message', 'Unknown error')}"
+            )
             return None
 
         executed_price, slippage = self._apply_slippage(
@@ -338,7 +280,11 @@ class TradingSystem:
                         "Trade remains in system but not submitted to broker."
                     )
 
-            return {"trade_id": trade.id, "signal": signal, "broker_order_id": self.broker_orders.get(trade.id)}
+            return {
+                "trade_id": trade.id,
+                "signal": signal,
+                "broker_order_id": self.broker_orders.get(trade.id),
+            }
 
         except Exception as exc:
             logger.error(f"Trade execution pipeline failed: {exc}")
@@ -349,7 +295,9 @@ class TradingSystem:
         """Generate a trade signal from the strategy."""
         return self.generate_signal(data)
 
-    def _build_trade_request(self, signal: Dict[str, Any], current_price: float) -> TradeRequest:
+    def _build_trade_request(
+        self, signal: Dict[str, Any], current_price: float
+    ) -> TradeRequest:
         """Build the risk engine payload from signal data."""
         return TradeRequest(
             symbol=self.strategy.name,
@@ -366,7 +314,9 @@ class TradingSystem:
 
     def _check_duplicate_position(self, symbol: str) -> Dict[str, Any]:
         """Check for duplicate open positions before opening a new trade."""
-        is_duplicate, reason = self.trade_manager.persistence.check_for_duplicates(symbol)
+        is_duplicate, reason = self.trade_manager.persistence.check_for_duplicates(
+            symbol
+        )
         return {"duplicate": is_duplicate, "reason": reason}
 
     def _validate_order(
@@ -460,24 +410,24 @@ class TradingSystem:
     ) -> Optional[str]:
         """
         Send validated trade order to broker via AngelService.
-        
+
         This method integrates with the production-grade broker service layer.
         It ensures:
         1. Trade has already been validated by RiskEngine
         2. Order is sent with standardized parameters
         3. Errors are logged with full context
-        
+
         Args:
             trade: Trade object from TradeManager
             executed_price: Price at which order will be executed
             signal: Signal that triggered the trade
-            
+
         Returns:
             Broker order ID if successful, None if failed
         """
         try:
             service = get_angel_service()
-            
+
             # Build order request for broker
             order_request = OrderRequest(
                 symbol=trade.symbol,
@@ -488,36 +438,36 @@ class TradingSystem:
                 stop_loss=trade.stop_loss,
                 product="INTRADAY",  # Configurable based on strategy
             )
-            
+
             logger.info(
                 f"Sending order to AngelOne: {order_request.direction} "
                 f"{order_request.quantity} {order_request.symbol} "
                 f"@ {executed_price:.2f}"
             )
-            
+
             # Send to broker
             response = service.place_order(order_request)
-            
+
             if response.is_success():
                 broker_order_id = response.data.get("order_id")
                 logger.info(
                     f"Order acknowledged by broker: order_id={broker_order_id}, "
                     f"trade_id={trade.id}"
                 )
-                
+
                 # Link broker order to local trade
                 trade.broker_order_id = broker_order_id
                 trade.status = "BROKER_SUBMITTED"
-                
+
                 return broker_order_id
-                
+
             else:
                 logger.error(
                     f"Broker rejected order: status={response.status.value}, "
                     f"message={response.message}, error_code={response.error_code}, "
                     f"retry_count={response.retry_count}"
                 )
-                
+
                 # Categorize error for caller
                 if response.status == ApiStatus.RATE_LIMIT:
                     logger.warning("Rate limited by broker, will retry next cycle")
@@ -525,36 +475,33 @@ class TradingSystem:
                     logger.error("Authentication failed, requires manual token refresh")
                 elif response.status == ApiStatus.TIMEOUT:
                     logger.warning("Broker connection timeout, will retry")
-                
+
                 return None
-                
+
         except Exception as e:
-            logger.error(
-                f"Exception sending order to broker: {str(e)}",
-                exc_info=True
-            )
+            logger.error(f"Exception sending order to broker: {str(e)}", exc_info=True)
             return None
 
     def reconcile_with_broker(self) -> Dict[str, Any]:
         """
         Reconcile local positions with broker positions.
-        
+
         This ensures consistency between local trade records and broker's
         authoritative position data after live trading.
-        
+
         Returns:
             Dict with reconciliation status and any corrections made
         """
         if not self.enable_live_trading or not self.broker_service:
             logger.warning("Live trading not enabled, skipping broker reconciliation")
             return {"status": "skipped", "reason": "live_trading_disabled"}
-        
+
         logger.info("Starting broker position reconciliation...")
-        
+
         try:
             # Get positions from broker
             response = self.broker_service.get_positions()
-            
+
             if not response.is_success():
                 logger.error(
                     f"Failed to reconcile with broker: {response.message} "
@@ -565,20 +512,20 @@ class TradingSystem:
                     "reason": response.message,
                     "error_code": response.error_code,
                 }
-            
+
             broker_positions = {
                 pos["symbol"]: pos for pos in response.data.get("positions", [])
             }
-            
+
             # Get local positions
             local_positions = {
                 trade.symbol: trade for trade in self.trade_manager.open_trades.values()
             }
-            
+
             # Reconciliation checks
             corrections = []
             discrepancies = []
-            
+
             # Check 1: Positions on broker but not locally (shouldn't happen)
             for symbol, broker_pos in broker_positions.items():
                 if symbol not in local_positions:
@@ -586,7 +533,7 @@ class TradingSystem:
                         f"Broker position exists but not in local system: {symbol} "
                         f"qty={broker_pos['quantity']}"
                     )
-            
+
             # Check 2: Local positions not on broker (order may not have filled)
             for symbol, local_trade in local_positions.items():
                 if symbol not in broker_positions:
@@ -594,7 +541,7 @@ class TradingSystem:
                         f"Local trade not yet on broker: {symbol} "
                         f"(may still be pending): trade_id={local_trade.id}"
                     )
-            
+
             # Check 3: Quantity mismatches
             for symbol, broker_pos in broker_positions.items():
                 if symbol in local_positions:
@@ -604,15 +551,19 @@ class TradingSystem:
                             f"Quantity mismatch for {symbol}: "
                             f"local={local_trade.quantity}, broker={broker_pos['quantity']}"
                         )
-                        corrections.append({
-                            "action": "update_quantity",
-                            "symbol": symbol,
-                            "local_quantity": local_trade.quantity,
-                            "broker_quantity": broker_pos["quantity"],
-                        })
-            
+                        corrections.append(
+                            {
+                                "action": "update_quantity",
+                                "symbol": symbol,
+                                "local_quantity": local_trade.quantity,
+                                "broker_quantity": broker_pos["quantity"],
+                            }
+                        )
+
             reconciliation_result = {
-                "status": "success" if not discrepancies else "completed_with_discrepancies",
+                "status": "success"
+                if not discrepancies
+                else "completed_with_discrepancies",
                 "broker_positions_count": len(broker_positions),
                 "local_positions_count": len(local_positions),
                 "discrepancies_found": len(discrepancies),
@@ -620,13 +571,17 @@ class TradingSystem:
                 "discrepancies": discrepancies,
                 "corrections": corrections,
             }
-            
-            logger.info(f"Broker reconciliation complete: {reconciliation_result['status']}")
-            
+
+            logger.info(
+                f"Broker reconciliation complete: {reconciliation_result['status']}"
+            )
+
             return reconciliation_result
-            
+
         except Exception as e:
-            logger.error(f"Exception during broker reconciliation: {str(e)}", exc_info=True)
+            logger.error(
+                f"Exception during broker reconciliation: {str(e)}", exc_info=True
+            )
             return {
                 "status": "error",
                 "reason": str(e),
@@ -724,14 +679,14 @@ class TradingSystem:
         """Run one complete trading cycle."""
         # Check market data staleness before executing trades
         mds = get_market_data_service()
-        
+
         # Default timeframe for strategy (typically 5m)
-        strategy_timeframe = getattr(self.strategy, 'timeframe', '5m')
-        
+        strategy_timeframe = getattr(self.strategy, "timeframe", "5m")
+
         # Check for key symbols in the data for staleness
-        if hasattr(data.index, 'names') and 'symbol' in data.index.names:
+        if hasattr(data.index, "names") and "symbol" in data.index.names:
             # Multi-index data with symbols
-            symbols = data.index.get_level_values('symbol').unique()
+            symbols = data.index.get_level_values("symbol").unique()
             for symbol in symbols:
                 if mds.is_data_stale(symbol, strategy_timeframe):
                     logger.warning(
@@ -747,7 +702,7 @@ class TradingSystem:
                         "stale_data_warning": f"Data for {symbol} is stale - cycle skipped",
                         "cache_age": mds.get_cache_age(symbol, strategy_timeframe),
                     }
-        
+
         cycle_result = {
             "timestamp": datetime.now(),
             "signal": None,

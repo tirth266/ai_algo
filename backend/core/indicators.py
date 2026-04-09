@@ -189,3 +189,39 @@ def is_volume_spike(
     volume_ma = calculate_volume_ma(data, period)
     current_volume = data["volume"].iloc[-1]
     return current_volume > (volume_ma.iloc[-1] * threshold)
+
+
+def calculate_adx(data: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Calculate ADX (Average Directional Index)."""
+    high = data["high"]
+    low = data["low"]
+    close = data["close"]
+
+    # Calculate True Range
+    tr1 = high - low
+    tr2 = abs(high - close.shift(1))
+    tr3 = abs(low - close.shift(1))
+    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+    # Calculate Directional Movement
+    dm_plus = high - high.shift(1)
+    dm_minus = low.shift(1) - low
+
+    # Filter movements
+    dm_plus[(dm_plus < 0) | (dm_plus < dm_minus)] = 0
+    dm_minus[(dm_minus < 0) | (dm_minus < dm_plus)] = 0
+
+    # Smoothed values
+    atr = true_range.rolling(window=period).mean()
+    dm_plus_smooth = dm_plus.rolling(window=period).mean()
+    dm_minus_smooth = dm_minus.rolling(window=period).mean()
+
+    # Directional Indicators
+    di_plus = 100 * (dm_plus_smooth / atr)
+    di_minus = 100 * (dm_minus_smooth / atr)
+
+    # ADX
+    dx = (abs(di_plus - di_minus) / (di_plus + di_minus)) * 100
+    adx = dx.rolling(window=period).mean()
+
+    return adx

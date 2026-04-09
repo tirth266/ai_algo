@@ -19,7 +19,7 @@ journal_router = APIRouter(prefix="/api/trading")
 
 def get_journal():
     """Get TradeJournal singleton instance."""
-    from backend.core.trade_journal import TradeJournal
+    from core.trade_journal import TradeJournal
 
     return TradeJournal()
 
@@ -183,7 +183,9 @@ async def clear_logs(request: Request):
         confirm = data.get("confirm", "false").lower()
 
         if confirm != "true":
-            raise HTTPException(status_code=400, detail="Must provide confirm=true to clear logs")
+            raise HTTPException(
+                status_code=400, detail="Must provide confirm=true to clear logs"
+            )
 
         journal = get_journal()
         journal.trade_logger.clear_logs()

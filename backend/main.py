@@ -8,33 +8,73 @@ import uuid
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
+from fastapi.middleware.cors import CORSMiddleware
 
-from backend.utils.logger import setup_logging
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel
+from typing import Optional, List
+import os
+from dotenv import load_dotenv
+import logging
+import uuid
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
+from fastapi.middleware.cors import CORSMiddleware
+
+from utils.logger import setup_logging
 
 try:
     from SmartApi import SmartConnect
 except ImportError:
     SmartConnect = None
 
-from backend.utils.symbol_manager import SymbolManager
-from backend.services.angelone_service import (
+from utils.symbol_manager import SymbolManager
+from services.angelone_service import (
     login as angel_login,
     get_angel_one_service,
 )
-from backend.services.market_data import global_price_store, start_data_manager
-from backend.database.models import SessionLocal, Trade, init_db
-from backend.core.nse_order_validator import validate_nse_order
+from services.market_data import global_price_store, start_data_manager
+from database.models import SessionLocal, Trade, init_db
+from core.nse_order_validator import validate_nse_order
 
 # Trading system imports
-from backend.core.execution import TradingSystem, Backtester
-from backend.core.trade_manager import TradeManager
+from core.execution import TradingSystem, Backtester
+from core.trade_manager import TradeManager
+
+app = FastAPI(title="Angel One Algo Trading API")
+symbol_manager = SymbolManager()
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://ai-algo-ul1l.vercel.app"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+# Import routers
+from api.angel_routes import angel_router
+from api.broker_routes import broker_router
+from api.journal_routes import journal_router
+from api.trading_routes import trading_router
+from routes.dashboard_routes import dashboard_bp
+from routes.reconciliation_routes import reconciliation_router
+
+# Include routers
+app.include_router(angel_router)
+app.include_router(broker_router)
+app.include_router(journal_router)
+app.include_router(trading_router)
+app.include_router(reconciliation_router)
+
+# Note: dashboard_bp is a Flask Blueprint, not compatible with FastAPI
+# The dashboard routes need to be handled separately or converted to FastAPI
 
 load_dotenv()
 setup_logging(log_level=os.environ.get("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
-
-app = FastAPI(title="Angel One Algo Trading API")
-symbol_manager = SymbolManager()
 
 
 # Init DB on startup
@@ -104,7 +144,7 @@ def get_prices():
     return global_price_store.get_all_prices()
 
 
-@app.post("/place-order")
+@app.post("/api/place-order")
 async def place_order_endpoint(order: OrderRequest, db: Session = Depends(get_db)):
     logger.info(f"Received order request: {order}")
 

@@ -18,24 +18,19 @@ from typing import Optional, Dict, Any, List, Tuple
 import logging
 
 from .base_strategy import BaseStrategy
-from ..indicators.supertrend import supertrend as calculate_supertrend
-from ..indicators.trendline import calculate_trendline_channels, identify_pivots
-from ..core.indicators import (
+from indicators.supertrend import supertrend as calculate_supertrend
+from indicators.trendline import calculate_trendline_channels, identify_pivots
+from core.indicators import (
     calculate_rsi,
     detect_rsi_divergence,
-    calculate_vwap_bands,
-    calculate_atr,
     calculate_ema,
-    calculate_volume_ma,
-    is_volume_spike,
+    calculate_atr,
+    calculate_adx,
 )
-from ..core.market_condition import (
-    detect_market_condition,
-    detect_market_structure,
-    is_trending_market,
-    is_sideways_market,
+from core.market_condition import (
+    detect_market_condition as get_market_condition,
 )
-from ..core.position_manager import create_managed_signal
+from core.position_manager import create_managed_signal
 
 logger = logging.getLogger(__name__)
 

@@ -22,7 +22,7 @@ from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 
-from ..core.position_persistence import PositionPersistence
+from core.position_persistence import PositionPersistence
 
 logger = logging.getLogger(__name__)
 
