@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "<string>", line 4, in <module>
+    import backend.main
+  File "T:\1311\algo-trading-platform\backend\main.py", line 29, in <module>
+    from backend.core.execution import TradingSystem, Backtester
+  File "T:\1311\algo-trading-platform\backend\core\execution.py", line 34, in <module>
+    class TradingSystem:
+    ...<756 lines>...
+            logger.info("TradingSystem stopped")
+  File "T:\1311\algo-trading-platform\backend\core\execution.py", line 394, in TradingSystem
+    ) -> Tuple[float, float]:
+         ^^^^^
+NameError: name 'Tuple' is not defined. Did you mean: 'tuple'?

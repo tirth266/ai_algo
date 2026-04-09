@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { journalService } from '../services/api';
-import { TrendingUp, TrendingDown, Activity, PieChart, BarChart3, Calendar } from 'lucide-react';
+import { TrendingUp, TrendingDown, Activity, PieChart } from 'lucide-react';
 
 export const JournalPage: React.FC = () => {
   const [loading, setLoading] = useState(true);

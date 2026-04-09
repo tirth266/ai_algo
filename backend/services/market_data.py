@@ -12,12 +12,16 @@ Date: March 16, 2026
 import pandas as pd
 import logging
 import os
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 import numpy as np
 import time
 import sys
+import threading
+import random
 sys.path.insert(0, 'backend')
+
+from backend.services.angelone_service import get_angel_one_service
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +45,22 @@ class MarketDataService:
     
     def __init__(self):
         """Initialize market data service."""
-        # Cache for candle data
-        self._cache: Dict[str, tuple] = {}  # symbol -> (candles, timestamp)
-        self._cache_ttl = 30  # Cache TTL in seconds (reduced from 60)
+        # Cache for candle data with timeframe awareness
+        # Key: (symbol, timeframe) -> (candles, timestamp, is_stale)
+        self._cache: Dict[tuple, tuple] = {}
+        
+        # TTL mapping by timeframe (in seconds)
+        # Aligns cache TTL with candle period to prevent stale data
+        self._ttl_map = {
+            '1m': 60,           # 1 minute candle -> 60 second TTL
+            '5m': 300,          # 5 minute candle -> 300 second (5 min) TTL
+            '15m': 900,         # 15 minute candle -> 900 second (15 min) TTL
+            '30m': 1800,        # 30 minute candle -> 1800 second (30 min) TTL
+            '60m': 3600,        # 60 minute candle -> 3600 second (60 min) TTL
+            '1h': 3600,         # 1 hour candle -> 3600 second TTL
+            'D': 86400,         # Daily candle -> 86400 second (24 hour) TTL
+            '1d': 86400,        # Daily candle -> 86400 second TTL
+        }
         
         # Instrument token cache
         self._instrument_tokens: Dict[str, int] = {}
@@ -75,27 +92,27 @@ class MarketDataService:
         try:
             logger.info(f"Fetching {limit} candles for {symbol} ({timeframe})")
             
-            # Check cache first
-            cached_data = self._get_from_cache(symbol)
+            # Check cache first (with timeframe awareness)
+            cached_data = self._get_from_cache(symbol, timeframe)
             if cached_data is not None:
-                logger.debug(f"Cache hit for {symbol}")
+                logger.debug(f"Cache hit for {symbol} ({timeframe})")
                 return cached_data
             
             # Try to fetch from Zerodha
             candles = self._fetch_candles_from_source(symbol, timeframe, limit)
             
             if candles is not None:
-                # Cache the data
-                self._add_to_cache(symbol, candles)
+                # Cache the data with timeframe awareness
+                self._add_to_cache(symbol, timeframe, candles)
                 return candles
             
-            # Fallback to mock data
-            logger.warning(f"Using mock data for {symbol}")
-            return self._generate_mock_data(symbol, limit)
+            # Return None if data is unavailable
+            logger.warning(f"Could not fetch data for {symbol}")
+            return None
             
         except Exception as e:
             logger.error(f"Error fetching candles for {symbol}: {str(e)}", exc_info=True)
-            return self._generate_mock_data(symbol, limit)
+            return None
     
     def _fetch_candles_from_source(
         self,
@@ -314,105 +331,138 @@ class MarketDataService:
         
         return df
     
-    def _generate_mock_data(self, symbol: str, limit: int = 500) -> pd.DataFrame:
+
+    
+    def _get_ttl_for_timeframe(self, timeframe: str) -> int:
         """
-        Generate realistic mock OHLCV data for testing.
+        Get cache TTL (time-to-live) for a given timeframe.
+        
+        Args:
+            timeframe: Candle timeframe ('1m', '5m', '15m', '30m', '60m', 'D')
+        
+        Returns:
+            TTL in seconds
+        
+        Example:
+            >>> ttl = mds._get_ttl_for_timeframe('5m')
+            >>> print(ttl)  # Output: 300 (5 minutes)
+        """
+        ttl = self._ttl_map.get(timeframe, 300)  # Default to 5 min if unknown
+        logger.debug(f"TTL for {timeframe}: {ttl}s")
+        return ttl
+    
+    def _get_from_cache(self, symbol: str, timeframe: str = '5m') -> Optional[pd.DataFrame]:
+        """
+        Get candles from cache if not expired (stale).
         
         Args:
             symbol: Stock symbol
-            limit: Number of bars to generate
+            timeframe: Candle timeframe for TTL calculation
         
         Returns:
-            DataFrame with simulated OHLCV data
+            DataFrame if cache hit and not stale, None otherwise
         """
-        logger.info(f"Generating mock data for {symbol} ({limit} bars)")
+        cache_key = (symbol, timeframe)
         
-        # Set random seed based on symbol for reproducibility
-        np.random.seed(hash(symbol) % (2**32))
-        
-        # Generate base price based on symbol
-        base_price = np.random.uniform(500, 3000)
-        
-        # Generate timestamps
-        end_date = datetime.now()
-        timestamps = [
-            end_date - timedelta(minutes=i)
-            for i in range(limit)
-        ]
-        timestamps.reverse()
-        
-        # Generate realistic price movements
-        drift = np.random.randn() * 0.0001  # Small drift
-        volatility = 0.02  # 2% volatility
-        
-        returns = np.random.normal(drift, volatility, limit)
-        
-        # Add some trending behavior
-        trend = np.sin(np.linspace(0, 8 * np.pi, limit)) * 0.005
-        returns = returns + trend
-        
-        # Calculate close prices
-        close_prices = base_price * (1 + returns).cumprod()
-        
-        # Generate OHLC from close prices
-        for i in range(limit):
-            open_price = close_prices[i] * (1 + np.random.uniform(-0.005, 0.005))
-            high_price = max(open_price, close_prices[i]) * (1 + np.abs(np.random.randn()) * 0.005)
-            low_price = min(open_price, close_prices[i]) * (1 - np.abs(np.random.randn()) * 0.005)
-            
-            if i == 0:
-                open_prices = [open_price]
-                high_prices = [high_price]
-                low_prices = [low_price]
-            else:
-                open_prices.append(open_price)
-                high_prices.append(high_price)
-                low_prices.append(low_price)
-        
-        # Generate volume
-        base_volume = np.random.randint(5000, 20000)
-        volume = base_volume * (1 + np.random.randn(limit) * 0.3)
-        volume = np.maximum(volume, 1000).astype(int)
-        
-        # Create DataFrame
-        df = pd.DataFrame({
-            'open': open_prices,
-            'high': high_prices,
-            'low': low_prices,
-            'close': close_prices,
-            'volume': volume
-        }, index=pd.DatetimeIndex(timestamps))
-        
-        # Ensure proper OHLC relationships
-        df['high'] = df[['open', 'high', 'close']].max(axis=1)
-        df['low'] = df[['open', 'low', 'close']].min(axis=1)
-        
-        logger.info(
-            f"Generated mock data: {limit} bars, "
-            f"price range: {df['close'].min():.2f} - {df['close'].max():.2f}"
-        )
-        
-        return df
-    
-    def _get_from_cache(self, symbol: str) -> Optional[pd.DataFrame]:
-        """Get candles from cache if not expired."""
-        if symbol in self._cache:
-            candles, timestamp = self._cache[symbol]
+        if cache_key in self._cache:
+            candles, timestamp, is_stale = self._cache[cache_key]
+            ttl = self._get_ttl_for_timeframe(timeframe)
             age = (datetime.now() - timestamp).total_seconds()
             
-            if age < self._cache_ttl:
+            if age < ttl:
+                # Data still fresh
+                logger.debug(
+                    f"Cache hit for {symbol} ({timeframe}): "
+                    f"age={age:.1f}s < ttl={ttl}s"
+                )
                 return candles
             else:
-                # Cache expired
-                del self._cache[symbol]
-                logger.debug(f"Cache expired for {symbol}")
+                # Cache expired - mark as stale and remove
+                del self._cache[cache_key]
+                logger.debug(
+                    f"Cache expired for {symbol} ({timeframe}): "
+                    f"age={age:.1f}s >= ttl={ttl}s - marking stale"
+                )
         
         return None
     
-    def _add_to_cache(self, symbol: str, candles: pd.DataFrame):
-        """Add candles to cache."""
-        self._cache[symbol] = (candles, datetime.now())
-        logger.debug(f"Cached {len(candles)} candles for {symbol}")
+    def _add_to_cache(self, symbol: str, timeframe: str, candles: pd.DataFrame):
+        """
+        Add candles to cache with timeframe awareness.
+        
+        Args:
+            symbol: Stock symbol
+            timeframe: Candle timeframe
+            candles: DataFrame with OHLCV data
+        """
+        cache_key = (symbol, timeframe)
+        ttl = self._get_ttl_for_timeframe(timeframe)
+        
+        self._cache[cache_key] = (candles, datetime.now(), False)  # is_stale=False
+        logger.debug(
+            f"Cached {len(candles)} candles for {symbol} ({timeframe}) "
+            f"with TTL={ttl}s"
+        )
+    
+    def is_data_stale(self, symbol: str, timeframe: str = '5m') -> bool:
+        """
+        Check if cached data is stale (older than TTL).
+        
+        Args:
+            symbol: Stock symbol
+            timeframe: Candle timeframe for TTL calculation
+        
+        Returns:
+            True if data is stale or missing, False if fresh
+        
+        Example:
+            >>> if mds.is_data_stale('RELIANCE', '5m'):
+            ...     logger.warning("Data is stale - fetch fresh data")
+        """
+        cache_key = (symbol, timeframe)
+        
+        if cache_key not in self._cache:
+            # No cache entry - consider stale
+            return True
+        
+        candles, timestamp, _ = self._cache[cache_key]
+        ttl = self._get_ttl_for_timeframe(timeframe)
+        age = (datetime.now() - timestamp).total_seconds()
+        
+        is_stale = age >= ttl
+        
+        if is_stale:
+            logger.warning(
+                f"Data for {symbol} ({timeframe}) is stale: "
+                f"age={age:.1f}s >= ttl={ttl}s"
+            )
+        
+        return is_stale
+    
+    def get_cache_age(self, symbol: str, timeframe: str = '5m') -> Optional[float]:
+        """
+        Get the age of cached data in seconds.
+        
+        Args:
+            symbol: Stock symbol
+            timeframe: Candle timeframe
+        
+        Returns:
+            Age in seconds if cached, None if not in cache
+        
+        Example:
+            >>> age = mds.get_cache_age('RELIANCE', '5m')
+            >>> if age and age > 60:
+            ...     logger.info(f"Data is {age}s old - consider refreshing")
+        """
+        cache_key = (symbol, timeframe)
+        
+        if cache_key in self._cache:
+            _, timestamp, _ = self._cache[cache_key]
+            age = (datetime.now() - timestamp).total_seconds()
+            return age
+        
+        return None
     
     def clear_cache(self):
         """Clear all cached data."""
@@ -438,7 +488,8 @@ class MarketDataService:
     def get_price_change(
         self,
         symbol: str,
-        periods: int = 1
+        periods: int = 1,
+        timeframe: str = '5m'
     ) -> Optional[Dict[str, Any]]:
         """
         Get price change over specified periods.
@@ -446,14 +497,25 @@ class MarketDataService:
         Args:
             symbol: Stock symbol
             periods: Number of periods to compare (default: 1)
+            timeframe: Candle timeframe (default: '5m')
         
         Returns:
             Dict with price change info or None
+        
+        Raises:
+            ValueError: If data is stale
         """
-        candles = self.get_candles(symbol, limit=periods + 1)
+        candles = self.get_candles(symbol, timeframe=timeframe, limit=periods + 1)
         
         if candles is None or len(candles) <= periods:
             return None
+        
+        # Check if data is stale before using for calculations
+        if self.is_data_stale(symbol, timeframe):
+            logger.warning(
+                f"⚠ Data for {symbol} ({timeframe}) is stale - "
+                f"price change calculation may be inaccurate"
+            )
         
         current_price = float(candles['close'].iloc[-1])
         previous_price = float(candles['close'].iloc[-(periods + 1)])
@@ -466,7 +528,10 @@ class MarketDataService:
             'current_price': current_price,
             'previous_price': previous_price,
             'change': change,
-            'change_pct': change_pct
+            'change_pct': change_pct,
+            'timeframe': timeframe,
+            'cache_age_seconds': self.get_cache_age(symbol, timeframe),
+            'is_stale': self.is_data_stale(symbol, timeframe)
         }
 
 
@@ -530,17 +595,54 @@ except ImportError:
     SmartWebSocketV2 = None
 
 class PriceStore:
+    """
+    Thread-safe price storage for live market data.
+    
+    Supports both simple float prices (backward compatible) and
+    rich price data with timestamps and metadata.
+    """
+    
     def __init__(self):
-        self.prices = {}
+        self.prices: Dict[str, Any] = {}
+        self._lock = threading.Lock()
 
-    def update_price(self, token: str, price: float):
-        self.prices[token] = price
+    def update_price(self, token: str, price_data: Any) -> None:
+        """
+        Update price for token.
+        
+        Args:
+            token: Symbol token (e.g., "SBIN-EQ")
+            price_data: Float price or dict with {'ltp', 'timestamp', 'received_at'}
+        """
+        with self._lock:
+            self.prices[token] = price_data
 
-    def get_price(self, token: str) -> Optional[float]:
-        return self.prices.get(token)
+    def get_price(self, token: str) -> Optional[Any]:
+        """Get price data for token."""
+        with self._lock:
+            return self.prices.get(token)
 
-    def get_all_prices(self):
-        return self.prices
+    def get_all_prices(self) -> Dict[str, Any]:
+        """Get all prices."""
+        with self._lock:
+            return self.prices.copy()
+    
+    def get_ltp(self, token: str) -> Optional[float]:
+        """
+        Get last traded price for token (extracting LTP from data).
+        
+        Backward compatible - handles both old float format and new dict format.
+        """
+        with self._lock:
+            price_data = self.prices.get(token)
+            
+            if price_data is None:
+                return None
+            
+            if isinstance(price_data, dict):
+                return price_data.get("ltp")
+            else:
+                return price_data  # Assume it's a float
 
 global_price_store = PriceStore()
 
@@ -590,42 +692,35 @@ class MarketDataWebSocket:
     def _reauth_and_reconnect(self):
         logger.info("Attempting to re-authenticate to refresh FEED_TOKEN...")
         try:
-            from SmartApi import SmartConnect
-            import pyotp
-            import time
             time.sleep(2)  # Delay before reconnect
-            
-            api_key = os.getenv("ANGEL_ONE_API_KEY")
-            client_id = os.getenv("ANGEL_ONE_CLIENT_ID")
-            totp_seed = os.getenv("ANGEL_ONE_TOTP_SEED")
-            
-            if api_key and client_id and totp_seed and totp_seed != 'your_totp_seed_here':
-                obj = SmartConnect(api_key=api_key)
-                totp = pyotp.TOTP(totp_seed).now()
-                data = obj.generateSession(client_id, client_id, totp)
-                if data['status']:
-                    self.feed_token = obj.getfeedToken()
-                    self.auth_token = data['data']['jwtToken']
-                    logger.info("Re-authenticated successfully. Reconnecting WebSocket...")
-                    # Reset websocket
-                    self.sws = None
-                    self.connect()
-                else:
-                    logger.error("Re-authentication failed. Cannot reconnect.")
-            else:
-                logger.warning("Missing credentials for re-auth. Trying to reconnect without it.")
+
+            service = get_angel_one_service()
+            try:
+                jwt_token = service.get_valid_token()
+            except Exception as exc:
+                logger.warning("Angel One token refresh/login failed: %s", exc)
+                jwt_token = None
+
+            feed_token = service.token_manager.get_feed_token()
+
+            if jwt_token:
+                self.auth_token = jwt_token
+                self.feed_token = feed_token
+                logger.info("Re-authenticated successfully via TokenManager. Reconnecting WebSocket...")
                 self.sws = None
                 self.connect()
+            else:
+                logger.error("Re-authentication failed. Cannot reconnect.")
         except Exception as e:
             logger.error(f"Error during re-auth: {e}")
 
     def _on_error(self, ws, error):
         logger.error(f"Angel One WebSocket Error: {error}")
-        self._reauth_and_reconnect()
+        # DataManager will detect connection drop and handle reconnection with exponential backoff
         
     def _on_close(self, ws, close_status_code, close_msg):
         logger.info(f"Angel One WebSocket closed: {close_status_code} - {close_msg}")
-        self._reauth_and_reconnect()
+        # DataManager will detect connection drop and handle reconnection with exponential backoff
 
     def connect(self):
         if not SmartWebSocketV2:
@@ -670,4 +765,539 @@ class MarketDataWebSocket:
     def close(self):
         if self.sws:
             self.sws.close()
+
+
+# ============================================================================
+# DATA MANAGER - Real-time Market Data Service
+# ============================================================================
+
+class DataManager:
+    """
+    Production-grade real-time market data manager.
+    
+    Automatically initializes and manages WebSocket connection for live data.
+    Ensures global_price_store is populated with current prices.
+    Includes health checks for data staleness.
+    
+    Usage:
+        >>> manager = DataManager()
+        >>> manager.start()
+        >>> # Data is now streaming into global_price_store
+        >>> # Access prices via global_price_store.get_price(token)
+    
+    Features:
+    - Automatic WebSocket connection management
+    - Live price updates with timestamps
+    - Staleness detection (alerts if no updates for X seconds)
+    - Health monitoring
+    - Thread-safe price storage
+    - Automatic reconnection on failure
+    
+    Author: Quantitative Trading Systems Engineer
+    Date: April 8, 2026
+    """
+    
+    # Configuration constants
+    STALE_DATA_THRESHOLD_SECONDS = 30  # Mark data stale if no updates
+    HEALTH_CHECK_INTERVAL_SECONDS = 10  # Check health every X seconds
+    STARTUP_TIMEOUT_SECONDS = 5  # Time to wait for WebSocket connection
+    
+    # Exponential backoff configuration
+    MAX_RETRIES = 10  # Max reconnect attempts before degradation
+    MAX_BACKOFF_SECONDS = 60  # Cap backoff delay at 60 seconds
+    JITTER_RANGE = 2  # Add 0-2 seconds random jitter
+    
+    def __init__(self):
+        """Initialize DataManager."""
+        self.ws = MarketDataWebSocket()
+        self.price_store = global_price_store
+        
+        # Health tracking
+        self.last_tick_time = None
+        self.tick_count = 0
+        self.is_running = False
+        self.is_connected = False
+        self.is_degraded = False  # System degradation flag
+        
+        # Reconnection retry tracking
+        self.retry_count = 0
+        self.last_retry_time = None
+        
+        # Thread management
+        self.health_check_thread = None
+        
+        logger.info("DataManager initialized")
+    
+    def start(self) -> bool:
+        """
+        Start the WebSocket connection and begin streaming live data.
+        
+        Returns:
+            bool: True if connection successful, False otherwise
+            
+        Example:
+            >>> manager = DataManager()
+            >>> if manager.start():
+            ...     print("✓ Data streaming started")
+            ... else:
+            ...     print("✗ Data streaming failed")
+        """
+        logger.info("Starting DataManager...")
+        
+        try:
+            # Connect WebSocket
+            self.ws.connect()
+            self.is_running = True
+            self.is_connected = True
+            self.last_tick_time = datetime.now()
+            
+            logger.info("✓ WebSocket connected successfully")
+            
+            # Start health check thread
+            self._start_health_check()
+            
+            logger.info("✓ DataManager started - live data streaming enabled")
+            return True
+            
+        except Exception as e:
+            logger.error(f"✗ Failed to start DataManager: {str(e)}", exc_info=True)
+            self.is_running = False
+            self.is_connected = False
+            return False
+    
+    def on_tick(self, tick: Dict[str, Any]) -> None:
+        """
+        Handle incoming tick data from WebSocket.
+        
+        Updates price_store with latest LTP and timestamp.
+        Tracks tick count for health monitoring.
+        
+        Args:
+            tick: Tick data dict with 'symbol', 'ltp', 'timestamp'
+            
+        Example:
+            >>> tick = {'symbol': 'SBIN-EQ', 'ltp': 520.50, 'timestamp': ...}
+            >>> manager.on_tick(tick)
+        """
+        try:
+            symbol = tick.get("symbol")
+            ltp = tick.get("ltp")
+            timestamp = tick.get("timestamp", datetime.now())
+            
+            if not symbol or ltp is None:
+                logger.warning(f"Invalid tick data: {tick}")
+                return
+            
+            # Update price store with timestamp
+            self.price_store.update_price(symbol, {
+                "ltp": ltp,
+                "timestamp": timestamp,
+                "received_at": datetime.now(),
+            })
+            
+            # Update health metrics
+            self.last_tick_time = datetime.now()
+            self.tick_count += 1
+            
+            # Log periodically (every 100 ticks)
+            if self.tick_count % 100 == 0:
+                logger.debug(
+                    f"DataManager: {self.tick_count} ticks processed, "
+                    f"symbols in store: {len(self.price_store.prices)}"
+                )
+        
+        except Exception as e:
+            logger.error(f"Error processing tick: {str(e)}", exc_info=True)
+    
+    def _start_health_check(self) -> None:
+        """
+        Start background health check thread.
+        
+        Monitors:
+        - Connection status
+        - Data staleness
+        - Tick count
+        """
+        import threading
+        
+        def health_check_loop():
+            while self.is_running:
+                try:
+                    self._perform_health_check()
+                    time.sleep(self.HEALTH_CHECK_INTERVAL_SECONDS)
+                except Exception as e:
+                    logger.error(f"Error in health check: {str(e)}")
+                    time.sleep(5)
+        
+        self.health_check_thread = threading.Thread(
+            target=health_check_loop,
+            daemon=True,
+            name="DataManager-HealthCheck"
+        )
+        self.health_check_thread.start()
+        logger.info("Health check thread started")
+    
+    def _perform_health_check(self) -> None:
+        """
+        Perform health check on data stream with exponential backoff reconnection.
+        
+        Checks:
+        1. Connection status
+        2. Data staleness
+        3. Tick frequency
+        4. Retry count and backoff
+        
+        Implements exponential backoff with jitter:
+        - delay = min(2^retry_count, 60) seconds
+        - Add 0-2 seconds jitter to prevent thundering herd
+        - After 10 retries: mark system as degraded and trigger alert
+        
+        Alerts if issues detected.
+        """
+        if not self.is_running:
+            return
+        
+        now = datetime.now()
+        
+        # Check 1: Data staleness
+        if self.last_tick_time:
+            staleness = (now - self.last_tick_time).total_seconds()
+            
+            if staleness > self.STALE_DATA_THRESHOLD_SECONDS:
+                logger.warning(
+                    f"⚠ Data is STALE: No updates for {staleness:.1f} seconds. "
+                    f"Last tick: {self.last_tick_time.isoformat()}. "
+                    f"Symbols in store: {len(self.price_store.prices)}"
+                )
+                self.is_connected = False
+                
+                # Check if we should attempt reconnection based on retry backoff
+                if self.last_retry_time is None or \
+                   (now - self.last_retry_time).total_seconds() >= self._get_backoff_delay():
+                    self._attempt_reconnect()
+                else:
+                    remaining_backoff = self._get_backoff_delay() - \
+                                       (now - self.last_retry_time).total_seconds()
+                    logger.debug(
+                        f"In backoff period: retry_count={self.retry_count}, "
+                        f"retry in {remaining_backoff:.1f}s"
+                    )
+            else:
+                # Data is fresh - reset retry count
+                if not self.is_connected or self.retry_count > 0:
+                    self.is_connected = True
+                    self.retry_count = 0
+                    self.is_degraded = False
+                    logger.info(
+                        f"✓ Data connection restored (previous retry_count={self.retry_count})"
+                    )
+        
+        # Check 2: Log status periodically
+        if self.tick_count % 1000 == 0 and self.tick_count > 0:
+            status_indicator = '🔴 DEGRADED' if self.is_degraded else \
+                              '🟢 LIVE' if self.is_connected else '🟡 STALE'
+            logger.info(
+                f"📊 DataManager Health: "
+                f"ticks={self.tick_count}, "
+                f"symbols={len(self.price_store.prices)}, "
+                f"staleness={staleness if self.last_tick_time else 'N/A'}s, "
+                f"retries={self.retry_count}/{self.MAX_RETRIES}, "
+                f"status={status_indicator}"
+            )
+    
+    def _get_backoff_delay(self) -> float:
+        """
+        Calculate backoff delay using exponential formula with jitter.
+        
+        Formula: delay = min(2^retry_count, 60) + random(0, 2)
+        
+        Returns:
+            Delay in seconds
+        """
+        # Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s, 60s, ...
+        exponential_delay = min(2 ** self.retry_count, self.MAX_BACKOFF_SECONDS)
+        
+        # Add jitter: 0-2 seconds random
+        jitter = random.uniform(0, self.JITTER_RANGE)
+        
+        total_delay = exponential_delay + jitter
+        
+        return total_delay
+    
+    def _attempt_reconnect(self) -> None:
+        """
+        Attempt to reconnect WebSocket with exponential backoff.
+        
+        Implements:
+        - Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s+
+        - Jitter: +0-2 seconds random
+        - Retry tracking: counts attempts and resets on success
+        - Fail-safe: After 10 retries, mark system as degraded
+        - Logging: logs each attempt, delay, and failure details
+        """
+        self.last_retry_time = datetime.now()
+        self.retry_count += 1
+        
+        # Calculate backoff
+        backoff_delay = self._get_backoff_delay()
+        exponential_part = min(2 ** (self.retry_count - 1), self.MAX_BACKOFF_SECONDS)
+        jitter_amount = backoff_delay - exponential_part
+        
+        logger.warning(
+            f"🔄 Reconnect attempt {self.retry_count}/{self.MAX_RETRIES}: "
+            f"backoff={exponential_part:.0f}s + jitter={jitter_amount:.2f}s = "
+            f"total delay {backoff_delay:.2f}s"
+        )
+        
+        # Check if we've exceeded max retries
+        if self.retry_count > self.MAX_RETRIES:
+            self.is_degraded = True
+            logger.critical(
+                f"🚨 SYSTEM DEGRADED: Max retries ({self.MAX_RETRIES}) exceeded. "
+                f"WebSocket unreachable for {self.retry_count} attempts. "
+                f"Broker may be down or network connectivity lost. "
+                f"Manual intervention required."
+            )
+            # TODO: Trigger alert to monitoring system
+            return
+        
+        # Apply sleep with backoff delay
+        logger.info(
+            f"Waiting {backoff_delay:.2f}s before reconnection attempt "
+            f"(exponential: {exponential_part:.0f}s, jitter: {jitter_amount:.2f}s)"
+        )
+        time.sleep(backoff_delay)
+        
+        # Attempt reconnection
+        try:
+            logger.info(f"Attempting WebSocket reconnection (attempt {self.retry_count}...)")
+            self.ws.close()
+            time.sleep(0.5)
+            self.ws = MarketDataWebSocket()
+            self.ws.connect()
+            self.is_connected = True
+            
+            # Reset retry count on successful connection
+            logger.info(
+                f"✓ WebSocket reconnected successfully after {self.retry_count} retries"
+            )
+            self.retry_count = 0
+            self.is_degraded = False
+            
+        except Exception as e:
+            logger.error(
+                f"✗ Reconnection attempt {self.retry_count} failed: {str(e)}. "
+                f"Will retry in {self._get_backoff_delay():.2f}s "
+                f"(next attempt {self.retry_count + 1}/{self.MAX_RETRIES})",
+                exc_info=True
+            )
+    
+    def get_price(self, symbol: str) -> Optional[float]:
+        """
+        Get latest price for symbol.
+        
+        Args:
+            symbol: Symbol token or name (e.g., "SBIN-EQ")
+            
+        Returns:
+            Latest price or None if not available
+            
+        Example:
+            >>> price = manager.get_price("SBIN-EQ")
+            >>> if price:
+            ...     print(f"SBIN LTP: ₹{price}")
+        """
+        try:
+            price_data = self.price_store.get_price(symbol)
+            
+            if isinstance(price_data, dict):
+                return price_data.get("ltp")
+            else:
+                return price_data  # Backward compatibility
+        except Exception as e:
+            logger.error(f"Error getting price for {symbol}: {str(e)}")
+            return None
+    
+    def get_price_with_metadata(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """
+        Get price with full metadata (timestamp, staleness).
+        
+        Args:
+            symbol: Symbol token or name
+            
+        Returns:
+            Dict with 'ltp', 'timestamp', 'staleness', 'is_stale' or None
+            
+        Example:
+            >>> data = manager.get_price_with_metadata("SBIN-EQ")
+            >>> if data:
+            ...     print(f"Price: ₹{data['ltp']}")
+            ...     print(f"Is stale: {data['is_stale']}")
+        """
+        try:
+            price_data = self.price_store.get_price(symbol)
+            
+            if not price_data:
+                return None
+            
+            if isinstance(price_data, dict):
+                timestamp = price_data.get("timestamp", datetime.now())
+                received_at = price_data.get("received_at", datetime.now())
+                
+                staleness = (datetime.now() - timestamp).total_seconds()
+                is_stale = staleness > self.STALE_DATA_THRESHOLD_SECONDS
+                
+                return {
+                    "symbol": symbol,
+                    "ltp": price_data.get("ltp"),
+                    "timestamp": timestamp,
+                    "received_at": received_at,
+                    "staleness_seconds": staleness,
+                    "is_stale": is_stale,
+                }
+            else:
+                # Backward compatibility for old price format
+                return {
+                    "symbol": symbol,
+                    "ltp": price_data,
+                    "timestamp": None,
+                    "staleness_seconds": None,
+                    "is_stale": True,  # No timestamp = considered stale
+                }
+        except Exception as e:
+            logger.error(f"Error getting price metadata for {symbol}: {str(e)}")
+            return None
+    
+    def get_all_prices(self) -> Dict[str, Any]:
+        """
+        Get all prices in store.
+        
+        Returns:
+            Dict mapping symbols to price data
+            
+        Example:
+            >>> prices = manager.get_all_prices()
+            >>> for symbol, data in prices.items():
+            ...     print(f"{symbol}: ₹{data['ltp']}")
+        """
+        return self.price_store.get_all_prices()
+    
+    def health_status(self) -> Dict[str, Any]:
+        """
+        Get current health status.
+        
+        Returns:
+            Dict with connection status, data freshness, tick count
+            
+        Example:
+            >>> status = manager.health_status()
+            >>> print(f"Connected: {status['is_connected']}")
+            >>> print(f"Symbols: {status['symbol_count']}")
+        """
+        staleness = None
+        if self.last_tick_time:
+            staleness = (datetime.now() - self.last_tick_time).total_seconds()
+        
+        return {
+            "is_running": self.is_running,
+            "is_connected": self.is_connected,
+            "tick_count": self.tick_count,
+            "symbol_count": len(self.price_store.prices),
+            "last_tick_time": self.last_tick_time,
+            "staleness_seconds": staleness,
+            "is_stale": staleness > self.STALE_DATA_THRESHOLD_SECONDS if staleness else None,
+        }
+    
+    def stop(self) -> None:
+        """
+        Stop the DataManager and close WebSocket connection.
+        
+        Example:
+            >>> manager.stop()
+            >>> print("Data streaming stopped")
+        """
+        logger.info("Stopping DataManager...")
+        
+        try:
+            self.is_running = False
+            self.is_connected = False
+            
+            if self.ws:
+                self.ws.close()
+            
+            if self.health_check_thread and self.health_check_thread.is_alive():
+                self.health_check_thread.join(timeout=5)
+            
+            logger.info("✓ DataManager stopped")
+        except Exception as e:
+            logger.error(f"Error stopping DataManager: {str(e)}")
+    
+    def subscribe_symbols(self, symbols: List[str], exchange: int = 1) -> None:
+        """
+        Subscribe to specific symbols for live updates.
+        
+        Args:
+            symbols: List of symbol tokens to subscribe
+            exchange: Exchange type (1=NSE, 2=BSE)
+            
+        Example:
+            >>> manager.subscribe_symbols(["SBIN-EQ", "RELIANCE-EQ"])
+        """
+        try:
+            self.ws.subscribe(symbols, exchange=exchange, mode=1)
+            logger.info(f"Subscribed to symbols: {symbols}")
+        except Exception as e:
+            logger.error(f"Error subscribing to symbols: {str(e)}")
+
+
+# ============================================================================
+# Global DataManager Instance
+# ============================================================================
+
+_global_data_manager: Optional["DataManager"] = None
+
+
+def get_data_manager() -> DataManager:
+    """
+    Get global DataManager instance (singleton pattern).
+    
+    Ensures single WebSocket connection for entire application.
+    
+    Returns:
+        DataManager instance
+        
+    Example:
+        >>> manager = get_data_manager()
+        >>> price = manager.get_price("SBIN-EQ")
+    """
+    global _global_data_manager
+    
+    if _global_data_manager is None:
+        _global_data_manager = DataManager()
+    
+    return _global_data_manager
+
+
+def start_data_manager() -> bool:
+    """
+    Start the global DataManager (called on system startup).
+    
+    Returns:
+        bool: True if started successfully
+        
+    Example:
+        >>> if start_data_manager():
+        ...     print("✓ Live data streaming started")
+    """
+    manager = get_data_manager()
+    return manager.start()
+
+
+def stop_data_manager() -> None:
+    """Stop the global DataManager."""
+    global _global_data_manager
+    
+    if _global_data_manager:
+        _global_data_manager.stop()
+        _global_data_manager = None
 

@@ -13,7 +13,7 @@ This package provides:
 
 Usage:
     from trading import run_live_trading
-    
+
     run_live_trading(
         strategy_class=LuxAlgoTrendlineStrategy,
         broker='zerodha',
@@ -33,29 +33,35 @@ from .broker_interface import (
     Position,
     OrderError,
     APIError,
-    ConnectionError
+    ConnectionError,
 )
 
 from .order_manager import OrderManager
 
-from .risk_controller import (
-    RiskController,
-    RiskLimits,
-    RiskStatus,
-    RiskMetrics
+# Paper trading fill engine (realistic slippage for virtual orders)
+from .paper_fill_engine import (
+    PaperFillEngine,
+    PaperBroker,
+    FillConfig,
+    FillResult,
+    tight_fill,
+    normal_fill,
+    wide_fill,
 )
+
+# RiskController removed - use RiskEngine from core.risk_engine
 
 from .live_strategy_runner import LiveStrategyRunner
 
 from .trading_dashboard_data import (
     TradingDashboardDataProvider,
-    create_dashboard_provider
+    create_dashboard_provider,
 )
 
 from .live_trading_runner import (
     LiveTradingRunner,
     run_live_trading,
-    run_live_trading_async
+    run_live_trading_async,
 )
 
 # Optional imports (may not be available)
@@ -66,38 +72,36 @@ except ImportError:
 
 __all__ = [
     # Main interface
-    'run_live_trading',
-    'run_live_trading_async',
-    'LiveTradingRunner',
-    
+    "run_live_trading",
+    "run_live_trading_async",
+    "LiveTradingRunner",
     # Broker interface
-    'BrokerInterface',
-    'Order',
-    'Position',
-    'OrderError',
-    'APIError',
-    'ConnectionError',
-    
+    "BrokerInterface",
+    "Order",
+    "Position",
+    "OrderError",
+    "APIError",
+    "ConnectionError",
     # Order management
-    'OrderManager',
-    
-    # Risk management
-    'RiskController',
-    'RiskLimits',
-    'RiskStatus',
-    'RiskMetrics',
-    
+    "OrderManager",
+    # Paper trading fill engine
+    "PaperFillEngine",
+    "PaperBroker",
+    "FillConfig",
+    "FillResult",
+    "tight_fill",
+    "normal_fill",
+    "wide_fill",
+    # Risk management - use RiskEngine from core.risk_engine
     # Strategy execution
-    'LiveStrategyRunner',
-    
+    "LiveStrategyRunner",
     # Dashboard
-    'TradingDashboardDataProvider',
-    'create_dashboard_provider',
-    
+    "TradingDashboardDataProvider",
+    "create_dashboard_provider",
     # Broker implementations
-    'ZerodhaBroker',
-    'create_zerodha_broker'
+    "ZerodhaBroker",
+    "create_zerodha_broker",
 ]
 
-__version__ = '1.0.0'
-__author__ = 'Quantitative Trading Systems Engineer'
+__version__ = "1.0.0"
+__author__ = "Quantitative Trading Systems Engineer"

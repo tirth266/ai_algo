@@ -42,7 +42,7 @@ class Trade(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     
     # Foreign key to orders
-    order_id = Column(Integer, ForeignKey('orders.id'), nullable=False, index=True)
+    order_id = Column(Integer, ForeignKey('orders.id'), nullable=True, index=True)
     
     # Trade details
     symbol = Column(String(50), nullable=False, index=True)
@@ -52,6 +52,8 @@ class Trade(Base):
     # Prices
     entry_price = Column(Float, nullable=False)
     exit_price = Column(Float, nullable=True)
+    stop_loss = Column(Float, nullable=True)
+    target = Column(Float, nullable=True)
     
     # Profit/Loss
     pnl = Column(Float, default=0.0)
@@ -81,6 +83,8 @@ class Trade(Base):
             'quantity': self.quantity,
             'entry_price': self.entry_price,
             'exit_price': self.exit_price,
+            'stop_loss': self.stop_loss,
+            'target': self.target,
             'pnl': self.pnl,
             'pnl_percentage': self.pnl_percentage,
             'status': self.status,

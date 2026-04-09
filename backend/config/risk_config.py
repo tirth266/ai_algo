@@ -8,6 +8,7 @@ Date: March 17, 2026
 """
 
 from config.settings import get_config
+from ..utils.alert_manager import get_alert_manager
 
 
 class RiskConfig:
@@ -106,6 +107,11 @@ class RiskConfig:
         """Disable trading (kill switch on)."""
         self.trading_enabled = False
         if reason:
+            alert_message = (
+                "System halted\n"
+                f"Reason: {reason}"
+            )
+            get_alert_manager().send(alert_message, level='CRITICAL')
             print(f"🚨 KILL SWITCH ACTIVATED: {reason}")
     
     def is_trading_enabled(self) -> bool:

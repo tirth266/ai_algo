@@ -29,12 +29,14 @@ Date: March 28, 2026
 """
 
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import time
 import json
 import requests
 from pathlib import Path
+
+from backend.services.angelone_service import get_angel_one_service
 
 try:
     from smartapi import SmartConnect
@@ -50,6 +52,7 @@ from .broker_interface import (
     BrokerInterface, Order, Position, 
     OrderError, APIError, ConnectionError
 )
+from backend.utils.alert_manager import get_alert_manager
 
 logger = logging.getLogger(__name__)
 
@@ -147,16 +150,15 @@ class AngelOneBroker(BrokerInterface):
             # Initialize SmartConnect
             self.smart_api = SmartConnect(api_key=self.api_key)
             
-            # Use provided token or auto-authenticate
+            # Use provided token or obtain a valid token from TokenManager
             if access_token:
                 self.smart_api.setAccessToken(access_token)
                 self.connected = True
             else:
-                # Auto-authenticate using TOTP
-                if self._authenticate_with_totp():
-                    self.connected = True
-                else:
-                    raise ConnectionError("Authentication failed")
+                service = get_angel_one_service()
+                jwt_token = service.get_valid_token()
+                self.smart_api.setAccessToken(jwt_token)
+                self.connected = True
             
             # Test connection by getting profile
             try:
@@ -185,6 +187,14 @@ class AngelOneBroker(BrokerInterface):
                 self.smart_api = None
             self.connected = False
             logger.info("Disconnected from Angel One")
+            get_alert_manager().send(
+                'Broker disconnected from Angel One',
+                level='WARNING',
+                extra={
+                    'broker': 'Angel One',
+                    'status': 'disconnected',
+                },
+            )
         except Exception as e:
             logger.error(f"Error during disconnect: {str(e)}")
     

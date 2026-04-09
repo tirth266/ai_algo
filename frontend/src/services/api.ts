@@ -18,7 +18,11 @@ import type {
   RegisterStrategyRequest,
   RegisterStrategyResponse,
   StrategyStats,
-  CombinedStrategyInfo
+  CombinedStrategyInfo,
+  TradingSystemStatus,
+  ActiveTrade,
+  TradeSignal,
+  TradePerformance
 } from '../types';
 
 // Use environment variable, fallback to local dev server

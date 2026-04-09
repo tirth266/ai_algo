@@ -1,12 +1,12 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
-  postgres:
-    image: postgres:15-alpine
-    container_name: algo_trading_db
-    restart: unless-stopped
-    environment:
+   # PostgreSQL Database
+   postgres:
+     image: postgres:15-alpine
+     container_name: algo_trading_db
+     restart: always
+     environment:
       POSTGRES_DB: ${POSTGRES_DB:-algo_trading}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-securepassword123}
@@ -23,12 +23,12 @@ services:
       timeout: 5s
       retries: 5
 
-  # Redis Cache (Optional)
-  redis:
-    image: redis:7-alpine
-    container_name: algo_trading_redis
-    restart: unless-stopped
-    command: redis-server --appendonly yes
+   # Redis Cache (Optional)
+   redis:
+     image: redis:7-alpine
+     container_name: algo_trading_redis
+     restart: always
+     command: redis-server --appendonly yes
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -41,15 +41,15 @@ services:
       timeout: 3s
       retries: 5
 
-  # Backend API Server
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: algo_trading_backend
-    restart: unless-stopped
-    env_file:
-      - .env
+   # Backend API Server
+   backend:
+     build:
+       context: .
+       dockerfile: Dockerfile
+     container_name: algo_trading_backend
+     restart: always
+     env_file:
+       - .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-securepassword123}@postgres:5432/${POSTGRES_DB:-algo_trading}
       REDIS_URL: redis://redis:6379/0
@@ -72,15 +72,15 @@ services:
       retries: 3
       start_period: 40s
 
-  # Frontend Web Server
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: algo_trading_frontend
-    restart: unless-stopped
-    ports:
-      - "${FRONTEND_PORT:-3000}:80"
+   # Frontend Web Server
+   frontend:
+     build:
+       context: ./frontend
+       dockerfile: Dockerfile
+     container_name: algo_trading_frontend
+     restart: always
+     ports:
+       - "${FRONTEND_PORT:-3000}:80"
     depends_on:
       - backend
     networks:
@@ -91,15 +91,15 @@ services:
       timeout: 3s
       retries: 3
 
-  # Daily Strategy Runner (Scheduled Jobs)
-  daily_runner:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: algo_trading_daily_runner
-    restart: unless-stopped
-    env_file:
-      - .env
+   # Daily Strategy Runner (Scheduled Jobs)
+   daily_runner:
+     build:
+       context: .
+       dockerfile: Dockerfile
+     container_name: algo_trading_daily_runner
+     restart: always
+     env_file:
+       - .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-securepassword123}@postgres:5432/${POSTGRES_DB:-algo_trading}
     volumes:

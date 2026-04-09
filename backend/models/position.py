@@ -7,7 +7,7 @@ Author: Quantitative Trading Systems Engineer
 Date: March 17, 2026
 """
 
-from sqlalchemy import Column, Integer, String, Float, DateTime
+from sqlalchemy import Column, Integer, String, Float, DateTime, UniqueConstraint
 from datetime import datetime
 
 from models.base import Base
@@ -21,7 +21,7 @@ class Position(Base):
     
     Fields:
         id: Primary key
-        symbol: Stock symbol
+        symbol: Stock symbol (UNIQUE for open positions with qty > 0)
         side: Long or Short
         quantity: Number of shares held
         average_price: Average entry price
@@ -30,6 +30,10 @@ class Position(Base):
         realized_pnl: Realized profit/loss from partial exits
         created_at: Position opened timestamp
         updated_at: Last update timestamp
+    
+    Constraints:
+        - Only ONE open position per symbol (qty > 0)
+        - Prevents duplicate position entries
     """
     
     __tablename__ = 'positions'
@@ -62,6 +66,12 @@ class Position(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    # Table constraints: Only ONE open position per symbol (qty > 0)
+    # This prevents duplicate entries after system restart
+    __table_args__ = (
+        UniqueConstraint('symbol', name='uq_open_position_symbol'),
+    )
+
     def to_dict(self):
         """Convert position to dictionary."""
         return {

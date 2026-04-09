@@ -1,0 +1,12 @@
+﻿src/components/AngelOneCard.tsx(3,67): error TS6133: 'RefreshCw' is declared but its value is never read.
+src/pages/JournalPage.tsx(3,56): error TS6133: 'BarChart3' is declared but its value is never read.
+src/pages/JournalPage.tsx(3,67): error TS6133: 'Calendar' is declared but its value is never read.
+src/pages/TradingDashboard.tsx(16,23): error TS6133: 'setEquityCurve' is declared but its value is never read.
+src/services/api.ts(259,32): error TS2304: Cannot find name 'TradingSystemStatus'.
+src/services/api.ts(260,42): error TS2304: Cannot find name 'TradingSystemStatus'.
+src/services/api.ts(281,32): error TS2304: Cannot find name 'ActiveTrade'.
+src/services/api.ts(282,42): error TS2304: Cannot find name 'ActiveTrade'.
+src/services/api.ts(289,33): error TS2304: Cannot find name 'TradeSignal'.
+src/services/api.ts(290,42): error TS2304: Cannot find name 'TradeSignal'.
+src/services/api.ts(297,37): error TS2552: Cannot find name 'TradePerformance'. Did you mean 'Performance'?
+src/services/api.ts(298,42): error TS2552: Cannot find name 'TradePerformance'. Did you mean 'Performance'?

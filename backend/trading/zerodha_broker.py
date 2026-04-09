@@ -31,6 +31,8 @@ from datetime import datetime
 import logging
 import time
 
+from ..utils.alert_manager import get_alert_manager
+
 try:
     from kiteconnect import KiteConnect
     from kiteconnect.exceptions import TokenException, NetworkException
@@ -175,6 +177,12 @@ class ZerodhaBroker(BrokerInterface):
                 self.kite = None
             self.connected = False
             logger.info("Disconnected from Zerodha")
+            alert_message = (
+                "Broker disconnect\n"
+                "Broker: Zerodha\n"
+                "Status: disconnected"
+            )
+            get_alert_manager().send(alert_message, level='WARNING')
         except Exception as e:
             logger.error(f"Error during disconnect: {str(e)}")
     

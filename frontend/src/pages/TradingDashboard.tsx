@@ -13,7 +13,7 @@ export function TradingDashboard() {
   const [trades, setTrades] = useState<ActiveTrade[]>([]);
   const [signals, setSignals] = useState<TradeSignal[]>([]);
   const [performance, setPerformance] = useState<TradePerformance | null>(null);
-  const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
+  const [equityCurve] = useState<EquityPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

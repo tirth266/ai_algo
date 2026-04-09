@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { angelService, setAngelConnected, removeAngelConnected, getAngelConnected, getSessionExpiry, setSessionExpiry } from '../services/angelApi';
-import { Link2, Loader, CheckCircle, XCircle, LogOut, Key, Clock, RefreshCw } from 'lucide-react';
+import { Link2, Loader, CheckCircle, XCircle, LogOut, Key, Clock } from 'lucide-react';
 
 const SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 

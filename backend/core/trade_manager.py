@@ -22,6 +22,8 @@ import logging
 
 from ..core.realistic_execution import RealisticExecutor
 from ..config.execution_config import get_execution_config
+from ..core.position_persistence import PositionPersistence
+from ..utils.alert_manager import get_alert_manager
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +141,9 @@ class TradeManager:
 
         self.open_trades: Dict[str, Trade] = {}
         self.closed_trades: List[Trade] = []
+        
+        # Initialize persistence layer
+        self.persistence = PositionPersistence()
 
         logger.info(
             f"TradeManager initialized: capital={capital}, "
@@ -167,8 +172,42 @@ class TradeManager:
         quantity: Optional[int] = None,
         confidence: str = "medium",
         reason: str = "",
-    ) -> Trade:
-        """Open a new trade."""
+        persist: bool = True,
+    ) -> Optional[Trade]:
+        """
+        Open a new trade with duplicate prevention.
+        
+        Args:
+            symbol: Stock symbol
+            direction: BUY or SELL
+            entry_price: Entry price
+            stop_loss: Stop loss level
+            take_profit_1: First target
+            take_profit_2: Second target
+            quantity: Position size
+            confidence: Signal confidence
+            reason: Signal reason
+            
+        Returns:
+            Trade object if opened, None if duplicate detected
+        """
+        # DUPLICATE CHECK: Query database (source of truth)
+        is_duplicate, reason_msg = self.persistence.check_for_duplicates(symbol)
+        
+        if is_duplicate:
+            alert_message = (
+                "Trade rejected\n"
+                f"Symbol: {symbol}\n"
+                f"Reason: Duplicate detected\n"
+                f"Details: {reason_msg}"
+            )
+            get_alert_manager().send(alert_message, level='WARNING')
+            logger.error(
+                f"TRADE REJECTED [{symbol}] — DUPLICATE DETECTED: {reason_msg} | "
+                f"Signal: {direction} @ {entry_price}"
+            )
+            return None
+        
         if quantity is None:
             quantity = self.calculate_position_size(entry_price, stop_loss)
 
@@ -193,10 +232,36 @@ class TradeManager:
 
         self.open_trades[trade_id] = trade
 
+        if persist:
+            try:
+                self.persistence.save_trade(
+                    symbol=symbol,
+                    side=direction,
+                    quantity=quantity,
+                    entry_price=entry_price,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit_2,
+                    status="open",
+                    strategy_name=reason or "signal_based",
+                    entry_time=trade.entry_time,
+                )
+            except Exception as e:
+                logger.error(f"Failed to persist trade: {str(e)}")
+
         logger.info(
             f"Trade opened: {trade_id} {direction} {quantity} @ {entry_price}, "
             f"SL={stop_loss}, TP1={take_profit_1}, TP2={take_profit_2}"
         )
+
+        alert_message = (
+            "Trade executed\n"
+            f"Symbol: {symbol}\n"
+            f"Action: {direction}\n"
+            f"Quantity: {quantity}\n"
+            f"Price: {entry_price:.2f}\n"
+            f"Reason: {reason or 'signal_based'}"
+        )
+        get_alert_manager().send(alert_message, level='INFO')
 
         return trade
 
@@ -292,6 +357,26 @@ class TradeManager:
                 self.closed_trades.append(trade)
                 del self.open_trades[trade_id]
                 result["action"] = "FULL_CLOSE"
+                
+                # Persist trade closure to database
+                try:
+                    self.persistence.save_trade(
+                        symbol=trade.symbol,
+                        side=trade.direction,
+                        quantity=trade.quantity,
+                        entry_price=trade.entry_price,
+                        exit_price=current_price,
+                        stop_loss=trade.stop_loss,
+                        take_profit=trade.take_profit_2,
+                        status="closed",
+                        exit_reason="TAKE_PROFIT",
+                        strategy_name=trade.reason or "signal_based",
+                        entry_time=trade.entry_time,
+                        exit_time=trade.exit_time,
+                        pnl=trade.realized_pnl,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to persist trade closure: {str(e)}")
 
             return result
 
@@ -352,6 +437,26 @@ class TradeManager:
 
             self.closed_trades.append(trade)
             del self.open_trades[trade_id]
+            
+            # Persist trade closure to database
+            try:
+                self.persistence.save_trade(
+                    symbol=trade.symbol,
+                    side=trade.direction,
+                    quantity=trade.quantity,
+                    entry_price=trade.entry_price,
+                    exit_price=exit_price,
+                    stop_loss=trade.stop_loss,
+                    take_profit=trade.take_profit_2,
+                    status="closed",
+                    exit_reason="STOP_LOSS",
+                    strategy_name=trade.reason or "signal_based",
+                    entry_time=trade.entry_time,
+                    exit_time=trade.exit_time,
+                    pnl=trade.realized_pnl,
+                )
+            except Exception as e:
+                logger.error(f"Failed to persist stop loss closure: {str(e)}")
 
             logger.info(f"SL hit: {trade_id} @ {exit_price}, PnL: {realized_pnl}")
 
@@ -392,12 +497,73 @@ class TradeManager:
 
         self.closed_trades.append(trade)
         del self.open_trades[trade_id]
+        
+        # Persist manual trade closure to database
+        try:
+            self.persistence.save_trade(
+                symbol=trade.symbol,
+                side=trade.direction,
+                quantity=trade.quantity,
+                entry_price=trade.entry_price,
+                exit_price=exit_price,
+                stop_loss=trade.stop_loss,
+                take_profit=trade.take_profit_2,
+                status="closed",
+                exit_reason="MANUAL",
+                strategy_name=trade.reason or "signal_based",
+                entry_time=trade.entry_time,
+                exit_time=trade.exit_time,
+                pnl=trade.realized_pnl,
+            )
+        except Exception as e:
+            logger.error(f"Failed to persist manual closure: {str(e)}")
 
         logger.info(
             f"Trade closed manually: {trade_id} @ {exit_price}, PnL: {realized_pnl}"
         )
 
         return result
+
+    def load_trades_from_database(self) -> int:
+        """
+        Load open trades from database on startup.
+        
+        Restores in-memory state from persisted trades to prevent data loss on restart.
+        
+        Returns:
+            Number of trades loaded
+        """
+        try:
+            loaded_trades = self.persistence.load_open_trades()
+            count = 0
+            
+            for trade_data in loaded_trades:
+                trade_id = trade_data['id']
+                
+                # Recreate Trade object from persisted data
+                trade = Trade(
+                    id=trade_id,
+                    symbol=trade_data['symbol'],
+                    direction=trade_data['direction'],
+                    entry_price=trade_data['entry_price'],
+                    quantity=trade_data['quantity'],
+                    stop_loss=trade_data['stop_loss'],
+                    take_profit_1=trade_data.get('take_profit_1', 0),
+                    take_profit_2=trade_data.get('take_profit_2', 0),
+                    current_stop_loss=trade_data['stop_loss'],
+                    status='OPEN',
+                    entry_time=trade_data.get('entry_time', datetime.now()),
+                )
+                
+                self.open_trades[trade_id] = trade
+                count += 1
+                
+            logger.info(f"Loaded {count} trades from database")
+            return count
+            
+        except Exception as e:
+            logger.error(f"Failed to load trades from database: {str(e)}")
+            return 0
 
     def get_open_trades(self) -> List[Dict]:
         """Get all open trades."""

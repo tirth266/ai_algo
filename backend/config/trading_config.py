@@ -8,13 +8,7 @@ Centralized configuration for strategy execution.
 # TRADING SYMBOLS
 # ============================================================================
 
-SYMBOLS = [
-    "RELIANCE",
-    "TCS", 
-    "INFY",
-    "HDFCBANK",
-    "ICICIBANK"
-]
+SYMBOLS = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK"]
 
 # ============================================================================
 # TIMEFRAMES
@@ -70,34 +64,25 @@ ENABLED_STRATEGIES = [
     "combined_strategy",  # Primary combined strategy
     "supertrend_strategy",
     "liquidity_strategy",
-    "trendline_break_strategy"
+    "trendline_break_strategy",
 ]
 
 # Strategy-specific configurations
 STRATEGY_CONFIGS = {
-    'combined_strategy': {
-        'min_confidence': 0.6,
-        'weights': {
-            'supertrend': 0.25,
-            'liquidity': 0.15,
-            'trendline': 0.20,
-            'vwap': 0.15,
-            'bollinger': 0.15,
-            'atr': 0.10
-        }
+    "combined_strategy": {
+        "min_confidence": 0.6,
+        "weights": {
+            "supertrend": 0.25,
+            "liquidity": 0.15,
+            "trendline": 0.20,
+            "vwap": 0.15,
+            "bollinger": 0.15,
+            "atr": 0.10,
+        },
     },
-    'supertrend_strategy': {
-        'atr_length': 10,
-        'factor': 3.0
-    },
-    'liquidity_strategy': {
-        'swing_length': 14,
-        'use_volume_filter': True
-    },
-    'trendline_break_strategy': {
-        'lookback_period': 20,
-        'breakout_threshold': 0.02
-    }
+    "supertrend_strategy": {"atr_length": 10, "factor": 3.0},
+    "liquidity_strategy": {"swing_length": 14, "use_volume_filter": True},
+    "trendline_break_strategy": {"lookback_period": 20, "breakout_threshold": 0.02},
 }
 
 # ============================================================================
@@ -109,6 +94,27 @@ LOG_FILE = "logs/daily_trades.log"
 
 # Log level: DEBUG, INFO, WARNING, ERROR
 LOG_LEVEL = "INFO"
+
+# ============================================================================
+# INDIAN BROKERAGE COST CONFIGURATION (AngelOne)
+# ============================================================================
+
+# Brokerage: 0.25% OR ₹20 per order (whichever is lower)
+BROKERAGE_PERCENT = 0.0025  # 0.25%
+BROKERAGE_MINIMUM = 20.0  # ₹20 minimum per order
+
+# Securities Transaction Tax (STT)
+STT_DELIVERY = 0.001  # 0.1% on delivery (equity)
+STT_INTRADAY = 0.00025  # 0.025% on intraday (equity)
+
+# Transaction Charges (NSE)
+TRANSACTION_CHARGES_PERCENT = 0.0000325  # 0.00325% of turnover
+
+# GST on brokerage + transaction charges
+GST_PERCENT = 0.18  # 18%
+
+# Slippage configuration
+SLIPPAGE_PERCENT = 0.0005  # 0.05% default
 
 # ============================================================================
 # EXECUTION SETTINGS

@@ -6,6 +6,10 @@ from dotenv import load_dotenv
 import logging
 import uuid
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
+
+from backend.utils.logger import setup_logging
 
 try:
     from SmartApi import SmartConnect
@@ -13,15 +17,20 @@ except ImportError:
     SmartConnect = None
 
 from backend.utils.symbol_manager import SymbolManager
-from backend.auth_manager import global_smart_session
-from backend.services.market_data import global_price_store
+from backend.services.angelone_service import (
+    login as angel_login,
+    get_angel_one_service,
+)
+from backend.services.market_data import global_price_store, start_data_manager
 from backend.database.models import SessionLocal, Trade, init_db
+from backend.core.nse_order_validator import validate_nse_order
 
 # Trading system imports
 from backend.core.execution import TradingSystem, Backtester
 from backend.core.trade_manager import TradeManager
 
 load_dotenv()
+setup_logging(log_level=os.environ.get("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Angel One Algo Trading API")
@@ -32,6 +41,15 @@ symbol_manager = SymbolManager()
 @app.on_event("startup")
 def on_startup():
     init_db()
+
+    # Start live market data streaming
+    try:
+        if start_data_manager():
+            logger.info("✓ Live market data streaming started")
+        else:
+            logger.warning("⚠ Could not start live market data streaming")
+    except Exception as e:
+        logger.warning(f"Could not start market data manager: {e}")
 
 
 # DB Dependency
@@ -59,22 +77,25 @@ class ConnectRequest(BaseModel):
 
 @app.post("/api/auth/connect")
 def connect_angel_one(req: ConnectRequest = None):
-    if req and req.auth_token:
-        success = global_smart_session.finalize_from_callback(req.auth_token)
-    else:
-        success = global_smart_session.login()
+    try:
+        if req and req.auth_token:
+            service = get_angel_one_service()
+            service.token_manager._store_tokens(req.auth_token, None, None)
+            service.is_authenticated = True
+        else:
+            angel_login()
 
-    if success:
         return {"status": "Success", "message": "Angel One session active."}
-    else:
-        raise HTTPException(status_code=401, detail="Angel One authentication failed.")
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
 
 
 @app.get("/api/auth/status")
 def check_auth_status():
+    service = get_angel_one_service()
     return {
         "status": "Success",
-        "is_authenticated": global_smart_session.is_valid_session(),
+        "is_authenticated": service.is_valid_session(),
     }
 
 
@@ -111,12 +132,38 @@ async def place_order_endpoint(order: OrderRequest, db: Session = Depends(get_db
             status_code=400, detail="LIMIT orders require a specified price > 0."
         )
 
-    # Price Validation against LTP
+    # Get current LTP for validation
     ltp = global_price_store.get_price(token)
+    if not ltp or ltp <= 0:
+        logger.warning(f"LTP not available for {order.symbol}")
+        ltp = order.price  # Fallback to order price if LTP unavailable
+
+    # NSE Compliance Validation
+    nse_validation = validate_nse_order(
+        symbol=order.symbol,
+        order_type=order.order_type,
+        quantity=order.quantity,
+        price=order.price,
+        ltp=ltp,
+        lot_size=lot_size,
+        max_slippage_pct=2.0,
+    )
+
+    if not nse_validation["valid"]:
+        logger.error(
+            f"NSE validation failed for {order.symbol}: {nse_validation['reason']}"
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=f"NSE Order Validation Failed: {nse_validation['reason']}",
+        )
+
+    logger.info(f"NSE validation passed: {order.symbol} {order.quantity}@{order.price}")
+
+    # Legacy slippage check (kept for compatibility)
     if ltp is not None and order.price > 0:
         difference = abs(order.price - ltp) / ltp
         if difference > 0.05:
-            # Drop the order if price is more than 5% away
             logger.warning(
                 f"Price validation failed: Order price {order.price} is >5% away from LTP {ltp}"
             )
@@ -359,15 +406,80 @@ async def run_backtest(
     return results
 
 
-@app.get("/api/trading/health")
-async def trading_health():
-    """Trading system health check."""
-    global _trading_system, _is_running
+@app.get("/api/health")
+async def health_check():
+    """Real system health check endpoint."""
+    from backend.services.angelone_service import get_angel_one_service
+    from backend.services.market_data import get_data_manager
+    from backend.core.risk_engine import RiskEngine
 
-    return {
-        "status": "healthy",
-        "system_active": _is_running,
-        "trades_open": len(_trading_system.trade_manager.open_trades)
-        if _trading_system
-        else 0,
+    health_details = {
+        "broker": "unknown",
+        "websocket": "unknown",
+        "db": "unknown",
+        "risk": "unknown",
     }
+
+    # 1. Check Broker connection
+    try:
+        angel_service = get_angel_one_service()
+        if angel_service.is_valid_session():
+            health_details["broker"] = "ok"
+        else:
+            health_details["broker"] = "invalid_token"
+    except Exception:
+        health_details["broker"] = "error"
+
+    # 2. Check WebSocket (receiving ticks)
+    try:
+        data_manager = get_data_manager()
+        ws_health = data_manager.health_status()
+        if ws_health["is_connected"] and not ws_health["is_stale"]:
+            health_details["websocket"] = "ok"
+        elif ws_health["is_connected"] and ws_health["is_stale"]:
+            health_details["websocket"] = "stale"
+        else:
+            health_details["websocket"] = "disconnected"
+    except Exception:
+        health_details["websocket"] = "error"
+
+    # 3. Check RiskEngine (not blocked)
+    try:
+        # Create a temporary risk engine to check status
+        risk_engine = RiskEngine()
+        risk_status = risk_engine.get_risk_status()
+        if risk_status["trading_allowed"]:
+            health_details["risk"] = "ok"
+        else:
+            health_details["risk"] = "blocked"
+    except Exception:
+        health_details["risk"] = "error"
+
+    # 4. Check Database connection
+    try:
+        db = SessionLocal()
+        db.execute(text("SELECT 1"))
+        db.close()
+        health_details["db"] = "ok"
+    except SQLAlchemyError:
+        health_details["db"] = "error"
+    except Exception:
+        health_details["db"] = "error"
+
+    # Determine overall status
+    broker_ok = health_details["broker"] == "ok"
+    websocket_ok = health_details["websocket"] == "ok"
+    db_ok = health_details["db"] == "ok"
+    risk_ok = health_details["risk"] == "ok"
+
+    # Critical failures (broker or db) -> down
+    if not broker_ok or not db_ok:
+        status = "down"
+    # Partial failures -> degraded
+    elif not websocket_ok or not risk_ok:
+        status = "degraded"
+    # All good -> healthy
+    else:
+        status = "healthy"
+
+    return {"status": status, "details": health_details}

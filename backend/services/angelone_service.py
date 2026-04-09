@@ -22,6 +22,8 @@ try:
 except ImportError:
     SmartConnect = None
 
+from backend.services.token_manager import TokenManager
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,7 +38,7 @@ class AngelOneService:
     """
 
     def __init__(self):
-        """Initialize with API key from environment."""
+        """Initialize with API key, MPIN, and TOTP config from environment."""
         self.api_key = os.getenv("ANGEL_ONE_API_KEY", "LFHr3Azz")
         self.client: Optional[SmartConnect] = None
         self.jwt_token: Optional[str] = None
@@ -44,6 +46,16 @@ class AngelOneService:
         self.feed_token: Optional[str] = None
         self.user_profile: Optional[Dict[str, Any]] = None
         self.is_authenticated = False
+
+        # Use MPIN for SmartAPI password authentication.
+        self.mpin = os.getenv("ANGEL_ONE_MPIN") or os.getenv("ANGEL_ONE_PASSWORD")
+        self.totp_seed = os.getenv("ANGEL_ONE_TOTP_SEED")
+        self.token_manager = TokenManager(
+            api_key=self.api_key,
+            client_id=os.getenv("ANGEL_ONE_CLIENT_ID"),
+            mpin=self.mpin,
+            totp_seed=self.totp_seed,
+        )
 
         logger.info(f"AngelOneService initialized with API key: {self.api_key[:8]}...")
 
@@ -66,70 +78,61 @@ class AngelOneService:
                 "success": False,
             }
 
-        try:
-            self.client = SmartConnect(api_key=self.api_key)
+        result = self.token_manager.login(
+            client_code=client_code, password=password, totp=totp, retries=1
+        )
 
-            data = self.client.generateSession(client_code, password, totp)
+        if result.get("success"):
+            self.is_authenticated = True
+            self.client = self.get_authenticated_client()
+            self.jwt_token = self.token_manager.jwt_token
+            self.refresh_token = self.token_manager.refresh_token
+            self.feed_token = self.token_manager.feed_token
 
-            if data and data.get("status"):
-                self.jwt_token = data["data"]["jwtToken"]
-                self.refresh_token = data["data"]["refreshToken"]
-                self.feed_token = self.client.getfeedToken()
-                self.is_authenticated = True
+        return result
 
-                logger.info(f"Login successful for client: {client_code}")
-
-                return {
-                    "status": "success",
-                    "message": "Login successful",
-                    "success": True,
-                    "data": {
-                        "jwt_token": self.jwt_token,
-                        "refresh_token": self.refresh_token,
-                        "feed_token": self.feed_token,
-                    },
-                }
-            else:
-                error_msg = (
-                    data.get("message", "Unknown error") if data else "No response"
-                )
-                logger.warning(f"Login failed: {error_msg}")
-
-                return {"status": "error", "message": error_msg, "success": False}
-
-        except Exception as e:
-            logger.error(f"Login error: {str(e)}")
-            return {"status": "error", "message": str(e), "success": False}
-
-    def auto_login(self) -> Dict[str, Any]:
+    def auto_login(self, retries: int = 3) -> Dict[str, Any]:
         """
-        Auto-login using environment credentials (client_id + TOTP seed).
+        Auto-login using environment credentials and retry logic.
 
-        Uses client_id as password (standard for TOTP setups).
+        The correct flow uses client_id + MPIN and OTP/TOTP.
 
         Returns:
             Dict with login status
         """
-        client_id = os.getenv("ANGEL_ONE_CLIENT_ID")
-        totp_seed = os.getenv("ANGEL_ONE_TOTP_SEED")
+        result = self.token_manager.login(retries=retries)
 
-        if not client_id or not totp_seed:
-            return {
-                "status": "error",
-                "message": "Missing ANGEL_ONE_CLIENT_ID or ANGEL_ONE_TOTP_SEED",
-                "success": False,
-            }
+        if result.get("success"):
+            self.is_authenticated = True
+            self.client = self.get_authenticated_client()
+            self.jwt_token = self.token_manager.jwt_token
+            self.refresh_token = self.token_manager.refresh_token
+            self.feed_token = self.token_manager.feed_token
 
-        try:
-            import pyotp
+        return result
 
-            totp = pyotp.TOTP(totp_seed).now()
 
-            return self.login(client_id, client_id, totp)
+    def get_valid_token(self) -> str:
+        """Return a valid JWT token, refreshing or logging in automatically if needed."""
+        token = self.token_manager.get_valid_token()
+        self.is_authenticated = True
+        self.jwt_token = token
+        self.refresh_token = self.token_manager.refresh_token
+        self.feed_token = self.token_manager.feed_token
+        return token
 
-        except Exception as e:
-            logger.error(f"Auto-login error: {str(e)}")
-            return {"status": "error", "message": str(e), "success": False}
+    def get_authenticated_client(self) -> SmartConnect:
+        """Return a SmartConnect client with a valid access token attached."""
+        if not SmartConnect:
+            raise RuntimeError("SmartApi package not installed")
+
+        token = self.get_valid_token()
+        client = SmartConnect(api_key=self.api_key)
+        client.setAccessToken(token)
+        return client
+
+    def get_token_state(self) -> Dict[str, Any]:
+        return self.token_manager.get_token_state()
 
     def get_profile(self) -> Dict[str, Any]:
         """
@@ -138,11 +141,12 @@ class AngelOneService:
         Returns:
             Dict with user profile data
         """
-        if not self.is_authenticated or not self.refresh_token:
+        if not self.token_manager.is_authenticated():
             return {"status": "error", "message": "Not authenticated", "success": False}
 
         try:
-            profile = self.client.getProfile(self.refresh_token)
+            client = self.get_authenticated_client()
+            profile = client.getProfile(self.refresh_token)
 
             if profile and profile.get("status"):
                 self.user_profile = profile["data"]
@@ -170,14 +174,7 @@ class AngelOneService:
         Returns:
             True if session is valid
         """
-        if not self.is_authenticated:
-            return False
-
-        try:
-            profile = self.get_profile()
-            return profile.get("success", False)
-        except Exception:
-            return False
+        return self.token_manager.is_authenticated()
 
     def logout(self) -> Dict[str, Any]:
         """
@@ -192,6 +189,7 @@ class AngelOneService:
         self.feed_token = None
         self.user_profile = None
         self.is_authenticated = False
+        self.token_manager.clear_tokens()
 
         logger.info("Logged out successfully")
 
@@ -204,12 +202,40 @@ class AngelOneService:
         Returns:
             Dict with connection status
         """
+        token_state = self.token_manager.get_token_state()
         return {
-            "authenticated": self.is_authenticated,
+            "authenticated": token_state["is_authenticated"],
             "api_key_set": bool(self.api_key),
             "client_id": os.getenv("ANGEL_ONE_CLIENT_ID"),
             "user_profile": self.user_profile,
+            "expires_at": token_state["expires_at"],
         }
+
+
+def login() -> Dict[str, str]:
+    """Perform Angel One login and return session tokens.
+
+    Returns:
+        dict: {"jwt_token", "refresh_token", "feed_token"}
+
+    Raises:
+        RuntimeError: If authentication fails after retries.
+    """
+    service = get_angel_one_service()
+    result = service.auto_login(retries=3)
+
+    if not result.get("success"):
+        raise RuntimeError(result.get("message", "Angel One login failed"))
+
+    tokens = service.token_manager.get_token_state()
+    if not tokens.get("jwt_token"):
+        raise RuntimeError("Angel One login succeeded but no JWT token is available")
+
+    return {
+        "jwt_token": tokens["jwt_token"],
+        "refresh_token": tokens["refresh_token"],
+        "feed_token": tokens["feed_token"],
+    }
 
 
 # Global singleton instance

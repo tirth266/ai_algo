@@ -13,6 +13,7 @@ class SmartSession:
     def __init__(self):
         self.api_key = os.getenv("ANGEL_ONE_API_KEY", "LFHr3Azz")
         self.client_id = os.getenv("ANGEL_ONE_CLIENT_ID")
+        self.mpin = os.getenv("ANGEL_ONE_MPIN") or os.getenv("ANGEL_ONE_PASSWORD")
         self.totp_seed = os.getenv("ANGEL_ONE_TOTP_SEED")
         
         self.jwt_token = None
@@ -27,34 +28,48 @@ class SmartSession:
         except Exception:
             logger.warning("Static IP Check failed. Ensure your server's IP is whitelisted.")
 
-    def login(self):
+    def login(self, retries: int = 3):
         self._check_static_ip_warning()
         if not SmartConnect:
             raise Exception("SmartApi package not found")
         
-        if not all([self.api_key, self.client_id, self.totp_seed]):
-            raise Exception("Missing API credentials. Check ANGEL_ONE_API_KEY, ANGEL_ONE_CLIENT_ID, ANGEL_ONE_TOTP_SEED")
+        if not all([self.api_key, self.client_id, self.mpin, self.totp_seed]):
+            raise Exception(
+                "Missing API credentials. Check ANGEL_ONE_API_KEY, ANGEL_ONE_CLIENT_ID, "
+                "ANGEL_ONE_MPIN (or ANGEL_ONE_PASSWORD), and ANGEL_ONE_TOTP_SEED"
+            )
             
-        try:
-            import pyotp
-            self.client = SmartConnect(api_key=self.api_key)
-            totp = pyotp.TOTP(self.totp_seed).now()
-            
-            # Use client_id as the PIN (default standard behavior for TOTP setups)
-            data = self.client.generateSession(self.client_id, self.client_id, totp)
-            
-            if data and data.get('status'):
-                self.feed_token = self.client.getfeedToken()
-                self.jwt_token = data['data']['jwtToken']
-                self.refresh_token = data['data']['refreshToken']
-                logger.info("Angel One Session generated successfully via Auto-Login.")
-                return True
-            else:
-                logger.error(f"Login failed: {data}")
-                return False
-        except Exception as e:
-            logger.error(f"Error during Angel One login: {e}")
-            return False
+        last_error = "Login could not be completed"
+
+        for attempt in range(1, retries + 1):
+            try:
+                import pyotp
+                self.client = SmartConnect(api_key=self.api_key)
+                totp = pyotp.TOTP(self.totp_seed).now()
+
+                data = self.client.generateSession(self.client_id, self.mpin, totp)
+                
+                if data and data.get('status'):
+                    self.feed_token = self.client.getfeedToken()
+                    self.jwt_token = data['data']['jwtToken']
+                    self.refresh_token = data['data']['refreshToken']
+                    logger.info(
+                        f"Angel One session generated successfully on attempt {attempt}."
+                    )
+                    return True
+
+                last_error = data or 'Unknown error'
+                logger.warning(
+                    f"Angel One login attempt {attempt} failed: {last_error}"
+                )
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(
+                    f"Angel One login attempt {attempt} failed: {last_error}"
+                )
+
+        logger.error(f"Angel One login failed after {retries} attempts: {last_error}")
+        return False
 
     def is_valid_session(self):
         if not self.client or not self.refresh_token:
