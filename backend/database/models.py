@@ -1,8 +1,10 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+import os
+import datetime
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
-import datetime
-import os
+
+from config import settings
 
 Base = declarative_base()
 
@@ -16,13 +18,13 @@ class Trade(Base):
     status = Column(String)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
 
-# Configure SQLite DB (Store in backend folder)
-db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "trades.db")
-engine = create_engine(
-    f"sqlite:///{db_path}",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool
-)
+# Configure DB via settings
+engine_args = {}
+if settings.DATABASE_URL.startswith("sqlite"):
+    engine_args["connect_args"] = {"check_same_thread": False}
+    engine_args["poolclass"] = StaticPool
+
+engine = create_engine(settings.DATABASE_URL, **engine_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():

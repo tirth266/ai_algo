@@ -1,199 +1,87 @@
-"""Broker authentication API routes implemented with Flask Blueprints."""
-
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import JSONResponse
 import logging
 from datetime import datetime
+from typing import Dict, Any
 
-from flask import Blueprint, jsonify, redirect, request
-
-from backend.flask_compat import ApiError
+from config import settings
 
 logger = logging.getLogger(__name__)
 
-broker_bp = Blueprint("broker", __name__, url_prefix="/api/broker")
+broker_router = APIRouter(prefix="/api/broker", tags=["broker"])
 
-
-@broker_bp.route("/login", methods=["GET"])
-def broker_login():
+@broker_router.get("/status")
+async def broker_status():
+    """
+    Check current broker status with safeguards.
+    No 500 should ever be raised from here.
+    """
     try:
-        from backend.trading.zerodha_auth_web import get_zerodha_auth_web
-
-        auth = get_zerodha_auth_web()
-        login_url = auth.generate_login_url()
-        return redirect(login_url)
-    except Exception as exc:
-        logger.error(f"Failed to generate login URL: {exc}")
-        raise ApiError(500, str(exc))
-
-
-@broker_bp.route("/callback", methods=["GET"])
-def broker_callback():
-    try:
-        request_token = request.args.get("request_token")
-        status = request.args.get("status", "success")
-
-        if status == "error" or not request_token:
-            return redirect(
-                "https://ai-algo-ul1l.vercel.app/broker?status=error&message=Authentication_failed"
-            )
-
-        from backend.trading.zerodha_auth_web import get_zerodha_auth_web
-
-        auth = get_zerodha_auth_web()
-        result = auth.handle_callback(request_token)
-
-        return redirect(
-            f"https://ai-algo-ul1l.vercel.app/broker?status=success&user_id={result['user_id']}&user_name={result['user_name']}"
-        )
-    except Exception as exc:
-        logger.error(f"Callback handling failed: {exc}")
-        return redirect(
-            f"https://ai-algo-ul1l.vercel.app/broker?status=error&message={exc}"
-        )
-
-
-@broker_bp.route("/status", methods=["GET"])
-def broker_status():
-    try:
-        from backend.trading.zerodha_auth_web import get_zerodha_auth_web
-
-        auth = get_zerodha_auth_web()
-        connected = auth.is_connected()
-
-        if connected:
-            session_info = auth.get_session_info()
-            return jsonify(
-                {
-                    "success": True,
-                    "connected": True,
-                    "broker": "Zerodha",
-                    "user_id": session_info.get("user_id"),
-                    "user_name": session_info.get("user_name"),
-                    "email": session_info.get("email"),
-                    "login_time": session_info.get("login_time"),
-                    "expiry_date": session_info.get("expiry_date"),
-                }
-            )
-
-        return jsonify(
-            {
+        # Check if Angel One is configured
+        if not settings.ANGEL_ONE_API_KEY or not settings.ANGEL_ONE_CLIENT_ID:
+            return {
                 "success": True,
                 "connected": False,
-                "broker": None,
-                "message": "Not connected to any broker",
+                "broker": "not_configured",
+                "message": "Angel One credentials missing in environment"
             }
-        )
-    except Exception as exc:
-        logger.error(f"Failed to check broker status: {exc}")
-        raise ApiError(500, str(exc))
 
-
-@broker_bp.route("/logout", methods=["POST"])
-def broker_logout():
-    try:
-        from backend.trading.zerodha_auth_web import get_zerodha_auth_web
-        auth = get_zerodha_auth_web()
-        auth.logout()
-        return jsonify({"success": True, "message": "Logged out successfully"})
-    except Exception as exc:
-        logger.error(f"Logout failed: {exc}")
-        raise ApiError(500, str(exc))
-
-
-@broker_bp.route("/connect", methods=["POST"])
-def broker_connect():
-    return jsonify({"status": "success", "message": "Broker connection endpoint"})
-
-
-@broker_bp.route("/info", methods=["GET"])
-def broker_info():
-    try:
-        from backend.trading.zerodha_auth_web import get_zerodha_auth_web
-
-        auth = get_zerodha_auth_web()
-        session_info = auth.get_session_info()
-
-        if session_info:
-            return jsonify(
-                {
-                    "success": True,
-                    "connected": True,
-                    "broker": "Zerodha",
-                    "session": session_info,
-                }
-            )
-
-        return jsonify(
-            {
-                "success": True,
-                "connected": False,
-                "broker": None,
-                "session": None,
-            }
-        )
-    except Exception as exc:
-        logger.error(f"Failed to get broker info: {exc}")
-        raise ApiError(500, str(exc))
-
-
-@broker_bp.route("/profile", methods=["GET"])
-def broker_profile():
-    try:
-        kite = None
         try:
-            from backend.trading.zerodha_auth_web import get_zerodha_auth_web
+            from services.angelone_service import get_angel_one_service
+            service = get_angel_one_service()
+            status = service.get_status()
+            
+            return {
+                "success": True,
+                "connected": status.get("authenticated", False),
+                "broker": "AngelOne",
+                "details": {
+                    "authenticated": status.get("authenticated", False),
+                    "client_id": status.get("client_id"),
+                    "user_name": status.get("user_profile", {}).get("name") if status.get("user_profile") else None
+                }
+            }
+        except Exception as inner_exc:
+            logger.error(f"Error communicating with Angel One service: {inner_exc}")
+            return {
+                "success": False,
+                "connected": False,
+                "broker": "error",
+                "message": "Broker service internal error",
+                "details": str(inner_exc)
+            }
 
-            auth = get_zerodha_auth_web()
-            if auth.is_connected():
-                kite = auth.get_kite_client()
-        except Exception:
-            pass
-
-        if kite is None:
-            try:
-                from backend.trading.zerodha_auth_manager import get_kite_client
-
-                kite = get_kite_client(auto_renew=False)
-            except Exception:
-                pass
-
-        if kite is None:
-            raise ApiError(401, "Session expired, please re-login.")
-
-        margins = kite.margins()
-        profile = kite.profile()
-        equity = margins.get("equity", {})
-        commodity = margins.get("commodity", {})
-
-        return jsonify(
-            {
-                "status": "success",
-                "data": {
-                    "user_id": profile.get("user_id"),
-                    "user_name": profile.get("user_name"),
-                    "email": profile.get("email", ""),
-                    "broker": profile.get("broker", "ZERODHA"),
-                    "equity": {
-                        "available_cash": equity.get("available", {}).get("cash", 0),
-                        "available_margin": equity.get("available", {}).get(
-                            "live_balance", 0
-                        ),
-                        "used_margin": equity.get("utilised", {}).get("debits", 0),
-                        "net": equity.get("net", 0),
-                    },
-                    "commodity": {
-                        "available_cash": commodity.get("available", {}).get("cash", 0),
-                        "available_margin": commodity.get("available", {}).get(
-                            "live_balance", 0
-                        ),
-                        "used_margin": commodity.get("utilised", {}).get("debits", 0),
-                        "net": commodity.get("net", 0),
-                    },
-                    "timestamp": datetime.now().isoformat(),
-                },
+    except Exception as exc:
+        logger.error(f"Critical error in /status endpoint: {exc}")
+        return JSONResponse(
+            status_code=200, # Still return 200 to satisfy safeguard requirement
+            content={
+                "success": False,
+                "status": "error",
+                "message": "Safeguard triggered",
+                "details": str(exc)
             }
         )
-    except ApiError:
-        raise
+
+@broker_router.get("/profile")
+async def broker_profile():
+    """Returns 401 if not authenticated, as expected."""
+    try:
+        from services.angelone_service import get_angel_one_service
+        service = get_angel_one_service()
+        
+        if not service.token_manager.is_authenticated():
+            return JSONResponse(status_code=401, content={"status": "error", "message": "Session expired, please re-login."})
+
+        profile = service.get_profile()
+        if profile.get("success"):
+            return {
+                "status": "success",
+                "data": profile["data"]
+            }
+        
+        return JSONResponse(status_code=400, content={"status": "error", "message": profile.get("message", "Profile fetch failed")})
+
     except Exception as exc:
-        logger.error(f"Broker profile fetch failed: {exc}")
-        raise ApiError(401, "Session expired, please re-login.")
+        logger.error(f"Profile error: {exc}")
+        return JSONResponse(status_code=401, content={"status": "error", "message": "Session authentication failed"})
