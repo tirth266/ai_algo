@@ -1,31 +1,46 @@
-import os
-import datetime
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, text
-from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy.pool import StaticPool
+import logging
 
-from config import settings
+logger = logging.getLogger(__name__)
 
-Base = declarative_base()
+class DummySession:
+    def __enter__(self):
+        return self
 
-class Trade(Base):
-    __tablename__ = 'trades'
-    id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(String, unique=True, index=True)
-    symbol = Column(String, index=True)
-    qty = Column(Integer)
-    price = Column(Float)
-    status = Column(String)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
-# Configure DB via settings
-engine_args = {}
-if settings.DATABASE_URL.startswith("sqlite"):
-    engine_args["connect_args"] = {"check_same_thread": False}
-    engine_args["poolclass"] = StaticPool
+    def execute(self, *args, **kwargs):
+        logger.debug("DummySession.execute called")
+        class DummyResult:
+            def scalar(self):
+                return None
+        return DummyResult()
 
-engine = create_engine(settings.DATABASE_URL, **engine_args)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    def query(self, *args, **kwargs):
+        return self
+
+    def filter(self, *args, **kwargs):
+        return self
+
+    def first(self):
+        return None
+
+    def all(self):
+        return []
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def add(self, obj):
+        pass
+
+    def flush(self):
+        pass
+
+SessionLocal = DummySession
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    logger.info("Database initialization skipped in zero-external-services mode")

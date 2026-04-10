@@ -16,7 +16,6 @@ from dotenv import load_dotenv
 
 from config import settings
 from utils.logger import setup_logging
-from database.models import init_db
 
 # Load env before settings validation
 load_dotenv()
@@ -51,11 +50,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.on_event("startup")
 async def startup_event():
     logger.info("🚀 Starting FastAPI Trading System...")
-    try:
-        init_db()
-        logger.info("✓ Database initialized")
-    except Exception as e:
-        logger.error(f"❌ Database initialization failed: {e}")
+    logger.info("✓ Database initialization skipped for zero-external-services mode")
 
     # Lazy data manager start if configured
     try:
@@ -68,27 +63,11 @@ async def startup_event():
 # Health Endpoint
 @app.get("/api/health")
 async def health():
-    db_status = "ok"
-    try:
-        from database.models import SessionLocal, text
-        with SessionLocal() as session:
-            session.execute(text("SELECT 1"))
-    except Exception:
-        db_status = "fail"
-
-    redis_status = "ok"
-    try:
-        import redis
-        r = redis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, socket_timeout=2)
-        r.ping()
-    except Exception:
-        redis_status = "fail"
-
     return {
         "status": "online",
         "timestamp": datetime.now().isoformat(),
-        "database": db_status,
-        "redis": redis_status,
+        "database": "disabled",
+        "redis": "disabled",
         "env": "verified" if settings.validate_config() else "incomplete"
     }
 
