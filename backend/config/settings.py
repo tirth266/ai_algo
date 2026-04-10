@@ -315,10 +315,12 @@ def init_config() -> Config:
     
     _config = Config()
     _config.validate()
-    
+
     logger.info(f"Configuration initialized: Trading Mode={_config.TRADING_MODE}")
-    
     return _config
+
+# Global settings instance for easier imports
+settings = Config()
 
 
 if __name__ == "__main__":

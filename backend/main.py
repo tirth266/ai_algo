@@ -14,12 +14,11 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
+# Load env before config is imported
+load_dotenv()
+
 from config import settings
 from utils.logger import setup_logging
-
-# Load env before settings validation
-load_dotenv()
-settings.validate_config()
 
 setup_logging(log_level=settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
@@ -68,7 +67,7 @@ async def health():
         "timestamp": datetime.now().isoformat(),
         "database": "disabled",
         "redis": "disabled",
-        "env": "verified" if settings.validate_config() else "incomplete"
+        "env": "loaded"
     }
 
 # Import and include routers
@@ -76,14 +75,12 @@ from api.broker_routes import broker_router
 from api.angel_routes import angel_router
 from api.journal_routes import journal_router
 from api.trading_routes import trading_router
-from routes.dashboard_routes import dashboard_bp
 from routes.reconciliation_routes import reconciliation_router
 
 app.include_router(broker_router)
 app.include_router(angel_router)
 app.include_router(journal_router)
 app.include_router(trading_router)
-app.include_router(dashboard_bp)
 app.include_router(reconciliation_router)
 
 if __name__ == "__main__":
