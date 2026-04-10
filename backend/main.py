@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from flask_cors import CORS
 
 # Load env before config is imported
 load_dotenv()
@@ -24,6 +25,13 @@ setup_logging(log_level=settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Angel One Algo Trading (FastAPI)")
+
+# Apply Flask-CORS fallback as requested, with wildcard fallback
+try:
+    CORS(app, origins="*")
+except Exception as e:
+    # If Flask-CORS cannot wrap this app, fallback to FastAPI CORS middleware
+    logging.warning(f"Flask-CORS not applied: {e}")
 
 app.add_middleware(
     CORSMiddleware,
