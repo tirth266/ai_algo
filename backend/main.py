@@ -10,17 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
 
-from fastapi import FastAPI, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Optional, List
-import os
-from dotenv import load_dotenv
-import logging
-import uuid
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import text
-from fastapi.middleware.cors import CORSMiddleware
+
 
 from utils.logger import setup_logging
 
@@ -68,9 +58,7 @@ app.include_router(broker_router)
 app.include_router(journal_router)
 app.include_router(trading_router)
 app.include_router(reconciliation_router)
-
-# Note: dashboard_bp is a Flask Blueprint, not compatible with FastAPI
-# The dashboard routes need to be handled separately or converted to FastAPI
+app.include_router(dashboard_bp)
 
 load_dotenv()
 setup_logging(log_level=os.environ.get("LOG_LEVEL", "INFO"))
@@ -449,9 +437,14 @@ async def run_backtest(
 @app.get("/api/health")
 async def health_check():
     """Real system health check endpoint."""
-    from backend.services.angelone_service import get_angel_one_service
-    from backend.services.market_data import get_data_manager
-    from backend.core.risk_engine import RiskEngine
+    try:
+        from backend.services.angelone_service import get_angel_one_service
+        from backend.services.market_data import get_data_manager
+        from backend.core.risk_engine import RiskEngine
+    except ImportError:
+        from services.angelone_service import get_angel_one_service
+        from services.market_data import get_data_manager
+        from core.risk_engine import RiskEngine
 
     health_details = {
         "broker": "unknown",

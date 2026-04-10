@@ -25,8 +25,23 @@ import type {
   TradePerformance
 } from '../types';
 
-// Use environment variable, fallback to local dev server
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:7000';
+const PROD_API_BASE_URL = 'https://ai-algo-66d6.onrender.com';
+
+const resolveApiBaseUrl = (): string => {
+  const configuredBaseUrl = import.meta.env.VITE_API_URL;
+
+  if (configuredBaseUrl) {
+    return configuredBaseUrl.replace(/\/$/, '');
+  }
+
+  if (import.meta.env.DEV) {
+    return 'http://localhost:7000';
+  }
+
+  return PROD_API_BASE_URL;
+};
+
+export const API_BASE_URL = resolveApiBaseUrl();
 
 // Create axios instance with base configuration
 const apiClient = axios.create({

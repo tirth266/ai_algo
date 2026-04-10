@@ -30,8 +30,8 @@ async def get_reconciliation(request: Request):
     global _reconciliation
     if _reconciliation is None:
         try:
-            from .core.broker_reconciliation import BrokerReconciliation
-            from .services.angelone_service import AngelOneService
+            from backend.core.broker_reconciliation import BrokerReconciliation
+            from backend.services.angelone_service import AngelOneService
             
             broker_service = AngelOneService()
             _reconciliation = BrokerReconciliation(broker_service=broker_service)
