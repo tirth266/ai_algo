@@ -1,15 +1,16 @@
-"""
-Trading Control API Routes
-"""
+"""Trading control API routes implemented with Flask Blueprints."""
 
-from fastapi import APIRouter, Request, HTTPException
-import threading
 import logging
+import threading
 from datetime import datetime
+
+from flask import Blueprint, jsonify
+
+from backend.flask_compat import ApiError
 
 logger = logging.getLogger(__name__)
 
-trading_router = APIRouter(prefix="/api/trading")
+trading_bp = Blueprint("trading", __name__, url_prefix="/api/trading")
 
 trading_state = {
     "running": False,
@@ -23,102 +24,105 @@ trading_state = {
 }
 
 
-@trading_router.post("/start")
-async def start_trading(request: Request):
+@trading_bp.route("/start", methods=["POST"])
+def start_trading():
     try:
         logger.info("Web UI requested to start trading...")
 
         if trading_state["running"]:
-            return {
-                "success": False,
-                "message": "Trading engine already running",
-                "status": await get_trading_status(request),
-            }
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "Trading engine already running",
+                    "status": _build_trading_status_payload(),
+                }
+            )
 
         try:
-            from trading.web_trading_controller import WebTradingController
+            from backend.trading.web_trading_controller import WebTradingController
 
             controller = WebTradingController()
-        except ImportError as e:
-            raise HTTPException(
-                status_code=500, detail=f"Trading controller not found: {str(e)}"
-            )
+        except ImportError as exc:
+            raise ApiError(500, f"Trading controller not found: {str(exc)}")
 
         def run_trading():
             try:
                 trading_state["running"] = True
                 trading_state["start_time"] = datetime.now().isoformat()
                 controller.run_trading_loop()
-            except Exception as e:
-                logger.error(f"Trading loop error: {str(e)}")
+            except Exception as exc:
+                logger.error(f"Trading loop error: {str(exc)}")
                 trading_state["running"] = False
                 raise
 
         trading_state["thread"] = threading.Thread(target=run_trading, daemon=True)
         trading_state["thread"].start()
 
-        status_result = await get_trading_status(request)
-        return {
-            "success": True,
-            "message": "Trading engine started successfully",
-            "status": status_result.get("status"),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to start trading: {str(e)}")
-        trading_state["running"] = False
-        raise HTTPException(
-            status_code=500, detail=f"Failed to start trading: {str(e)}"
+        return jsonify(
+            {
+                "success": True,
+                "message": "Trading engine started successfully",
+                "status": _build_trading_status_payload(),
+            }
         )
+    except ApiError:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to start trading: {str(exc)}")
+        trading_state["running"] = False
+        raise ApiError(500, f"Failed to start trading: {str(exc)}")
 
 
-@trading_router.post("/stop")
-async def stop_trading(request: Request):
+@trading_bp.route("/stop", methods=["POST"])
+def stop_trading():
     try:
         if not trading_state["running"]:
-            return {
-                "success": False,
-                "message": "Trading engine not running",
-                "status": await get_trading_status(request),
-            }
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "Trading engine not running",
+                    "status": _build_trading_status_payload(),
+                }
+            )
 
         trading_state["running"] = False
         if trading_state["thread"]:
             trading_state["thread"].join(timeout=5.0)
 
-        status_result = await get_trading_status(request)
-        return {
-            "success": True,
-            "message": "Trading engine stopped successfully",
-            "status": status_result.get("status"),
-        }
+        return jsonify(
+            {
+                "success": True,
+                "message": "Trading engine stopped successfully",
+                "status": _build_trading_status_payload(),
+            }
+        )
+    except Exception as exc:
+        logger.error(f"Failed to stop trading: {str(exc)}")
+        raise ApiError(500, f"Failed to stop trading: {str(exc)}")
 
-    except Exception as e:
-        logger.error(f"Failed to stop trading: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to stop trading: {str(e)}")
+
+def _build_trading_status_payload():
+    return {
+        "running": trading_state["running"],
+        "active_strategies": trading_state["active_strategies"],
+        "broker_connected": trading_state["broker_connected"],
+        "symbols_monitored": trading_state["symbols_monitored"],
+        "signals_generated": trading_state["signals_generated"],
+        "orders_placed": trading_state["orders_placed"],
+        "start_time": trading_state["start_time"],
+        "uptime": calculate_uptime(trading_state["start_time"])
+        if trading_state["start_time"]
+        else None,
+    }
 
 
-@trading_router.get("/status")
-async def get_trading_status(request: Request):
+@trading_bp.route("/status", methods=["GET"])
+def get_trading_status():
     try:
-        status = {
-            "running": trading_state["running"],
-            "active_strategies": trading_state["active_strategies"],
-            "broker_connected": trading_state["broker_connected"],
-            "symbols_monitored": trading_state["symbols_monitored"],
-            "signals_generated": trading_state["signals_generated"],
-            "orders_placed": trading_state["orders_placed"],
-            "start_time": trading_state["start_time"],
-            "uptime": calculate_uptime(trading_state["start_time"])
-            if trading_state["start_time"]
-            else None,
-        }
-        return {"success": True, "status": status}
-    except Exception as e:
-        logger.error(f"Failed to get trading status: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
+        return jsonify({"success": True, "status": _build_trading_status_payload()})
+    except Exception as exc:
+        logger.error(f"Failed to get trading status: {str(exc)}")
+        raise ApiError(500, f"Failed to get status: {str(exc)}")
 
 
 def calculate_uptime(start_time_str: str) -> str:

@@ -1,31 +1,26 @@
-"""
-Trade Journal API Routes
+"""Trade journal API routes implemented with Flask Blueprints."""
 
-Endpoints for logs, analytics, and equity curve data.
-
-Author: Quantitative Trading Systems Engineer
-Date: April 7, 2026
-"""
-
-from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import JSONResponse
 import logging
 from datetime import datetime
 
+from flask import Blueprint, jsonify, request
+
+from backend.flask_compat import ApiError
+
 logger = logging.getLogger(__name__)
 
-journal_router = APIRouter(prefix="/api/trading")
+journal_bp = Blueprint("journal", __name__, url_prefix="/api/trading")
 
 
 def get_journal():
     """Get TradeJournal singleton instance."""
-    from core.trade_journal import TradeJournal
+    from backend.core.trade_journal import TradeJournal
 
     return TradeJournal()
 
 
-@journal_router.get("/logs")
-async def get_trade_logs(request: Request):
+@journal_bp.route("/logs", methods=["GET"])
+def get_trade_logs():
     """
     Get trade logs with optional filters.
 
@@ -39,10 +34,10 @@ async def get_trade_logs(request: Request):
         JSON with trades array
     """
     try:
-        limit = int(request.query_params.get("limit", 100))
-        symbol = request.query_params.get("symbol", None)
-        start_date = request.query_params.get("start_date", None)
-        end_date = request.query_params.get("end_date", None)
+        limit = int(request.args.get("limit", 100))
+        symbol = request.args.get("symbol")
+        start_date = request.args.get("start_date")
+        end_date = request.args.get("end_date")
 
         start = datetime.fromisoformat(start_date) if start_date else None
         end = datetime.fromisoformat(end_date) if end_date else None
@@ -52,15 +47,14 @@ async def get_trade_logs(request: Request):
             limit=limit, symbol=symbol, start_date=start, end_date=end
         )
 
-        return {"success": True, "trades": trades, "count": len(trades)}
+        return jsonify({"success": True, "trades": trades, "count": len(trades)})
+    except Exception as exc:
+        logger.error(f"Failed to get trade logs: {exc}")
+        raise ApiError(500, str(exc))
 
-    except Exception as e:
-        logger.error(f"Failed to get trade logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-
-@journal_router.get("/signals")
-async def get_signal_logs(request: Request):
+@journal_bp.route("/signals", methods=["GET"])
+def get_signal_logs():
     """
     Get signal logs with optional filters.
 
@@ -74,25 +68,24 @@ async def get_signal_logs(request: Request):
         JSON with signals array
     """
     try:
-        limit = int(request.query_params.get("limit", 100))
-        symbol = request.query_params.get("symbol", None)
-        executed_only = request.query_params.get("executed", "false").lower() == "true"
-        strategy = request.query_params.get("strategy", None)
+        limit = int(request.args.get("limit", 100))
+        symbol = request.args.get("symbol")
+        executed_only = request.args.get("executed", "false").lower() == "true"
+        strategy = request.args.get("strategy")
 
         journal = get_journal()
         signals = journal.get_signals(
             limit=limit, symbol=symbol, executed_only=executed_only, strategy=strategy
         )
 
-        return {"success": True, "signals": signals, "count": len(signals)}
+        return jsonify({"success": True, "signals": signals, "count": len(signals)})
+    except Exception as exc:
+        logger.error(f"Failed to get signal logs: {exc}")
+        raise ApiError(500, str(exc))
 
-    except Exception as e:
-        logger.error(f"Failed to get signal logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-
-@journal_router.get("/analytics")
-async def get_analytics(request: Request):
+@journal_bp.route("/analytics", methods=["GET"])
+def get_analytics():
     """
     Get performance analytics.
 
@@ -103,17 +96,16 @@ async def get_analytics(request: Request):
         journal = get_journal()
         analytics = journal.get_full_analytics()
 
-        return {"success": True, "analytics": analytics}
+        return jsonify({"success": True, "analytics": analytics})
+    except Exception as exc:
+        logger.error(f"Failed to get analytics: {exc}")
+        raise ApiError(500, str(exc))
 
-    except Exception as e:
-        logger.error(f"Failed to get analytics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-
-@journal_router.get("/equity-curve")
-async def get_equity_curve(request: Request):
+@journal_bp.route("/equity-curve", methods=["GET"])
+def get_equity_curve():
     try:
-        limit = int(request.query_params.get("limit", 1000))
+        limit = int(request.args.get("limit", 1000))
 
         journal = get_journal()
         equity_data = journal.get_equity_curve()
@@ -121,15 +113,16 @@ async def get_equity_curve(request: Request):
         if len(equity_data) > limit:
             equity_data = equity_data[-limit:]
 
-        return {"success": True, "equity_curve": equity_data, "count": len(equity_data)}
+        return jsonify(
+            {"success": True, "equity_curve": equity_data, "count": len(equity_data)}
+        )
+    except Exception as exc:
+        logger.error(f"Failed to get equity curve: {exc}")
+        raise ApiError(500, str(exc))
 
-    except Exception as e:
-        logger.error(f"Failed to get equity curve: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-
-@journal_router.get("/strategy-performance")
-async def get_strategy_performance(request: Request):
+@journal_bp.route("/strategy-performance", methods=["GET"])
+def get_strategy_performance():
     """
     Get strategy-wise performance breakdown.
 
@@ -140,59 +133,55 @@ async def get_strategy_performance(request: Request):
         journal = get_journal()
         breakdown = journal.get_strategy_breakdown()
 
-        return {"success": True, "strategies": breakdown}
+        return jsonify({"success": True, "strategies": breakdown})
+    except Exception as exc:
+        logger.error(f"Failed to get strategy performance: {exc}")
+        raise ApiError(500, str(exc))
 
-    except Exception as e:
-        logger.error(f"Failed to get strategy performance: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-
-@journal_router.get("/daily-summary")
-async def get_daily_summary(request: Request):
+@journal_bp.route("/daily-summary", methods=["GET"])
+def get_daily_summary():
     try:
-        date_str = request.query_params.get("date", None)
+        date_str = request.args.get("date")
         date = datetime.fromisoformat(date_str) if date_str else datetime.now()
 
         journal = get_journal()
         summary = journal.get_daily_summary(date)
 
-        return {"success": True, "summary": summary}
+        return jsonify({"success": True, "summary": summary})
+    except Exception as exc:
+        logger.error(f"Failed to get daily summary: {exc}")
+        raise ApiError(500, str(exc))
 
-    except Exception as e:
-        logger.error(f"Failed to get daily summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-
-@journal_router.get("/signal-stats")
-async def get_signal_stats(request: Request):
+@journal_bp.route("/signal-stats", methods=["GET"])
+def get_signal_stats():
     try:
         journal = get_journal()
         stats = journal.get_signal_statistics()
 
-        return {"success": True, "stats": stats}
+        return jsonify({"success": True, "stats": stats})
+    except Exception as exc:
+        logger.error(f"Failed to get signal stats: {exc}")
+        raise ApiError(500, str(exc))
 
-    except Exception as e:
-        logger.error(f"Failed to get signal stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-
-@journal_router.post("/clear-logs")
-async def clear_logs(request: Request):
+@journal_bp.route("/clear-logs", methods=["POST"])
+def clear_logs():
     try:
-        data = await request.json()
-        confirm = data.get("confirm", "false").lower()
+        data = request.get_json(silent=True) or {}
+        confirm = str(data.get("confirm", "false")).lower()
 
         if confirm != "true":
-            raise HTTPException(
-                status_code=400, detail="Must provide confirm=true to clear logs"
-            )
+            raise ApiError(400, "Must provide confirm=true to clear logs")
 
         journal = get_journal()
         journal.trade_logger.clear_logs()
         journal.signal_logger.clear_logs()
 
-        return {"success": True, "message": "All logs cleared"}
-
-    except Exception as e:
-        logger.error(f"Failed to clear logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return jsonify({"success": True, "message": "All logs cleared"})
+    except ApiError:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to clear logs: {exc}")
+        raise ApiError(500, str(exc))

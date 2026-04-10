@@ -1,13 +1,14 @@
 # Web Framework
-fastapi==0.104.1
-uvicorn[standard]==0.23.2
+Flask
 websockets==12.0
+gunicorn
 
 # Core Dependencies
 requests==2.31.0
 pandas==2.1.4
 numpy==1.26.2
 redis==5.0.1
+scipy==1.11.4
 
 # Database
 SQLAlchemy==2.0.23
@@ -23,5 +24,3 @@ pyotp==2.9.0
 
 # Logging
 colorlog==6.8.0
-
-gunicorn

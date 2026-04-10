@@ -13,19 +13,21 @@ Date: April 8, 2026
 """
 
 import logging
-from fastapi import APIRouter, Request, HTTPException
+from flask import Blueprint, request
 from pydantic import BaseModel
 from typing import Dict, Any
 
+from backend.flask_compat import ApiError
+
 logger = logging.getLogger(__name__)
 
-reconciliation_router = APIRouter(prefix='/api/reconcile')
+reconciliation_bp = Blueprint("reconciliation", __name__, url_prefix="/api/reconcile")
 
 # Global reconciliation state
 _reconciliation = None
 
 
-async def get_reconciliation(request: Request):
+def get_reconciliation():
     """Get or initialize global reconciliation instance."""
     global _reconciliation
     if _reconciliation is None:
@@ -43,8 +45,8 @@ async def get_reconciliation(request: Request):
     return _reconciliation
 
 
-@reconciliation_router.post('')
-async def start_reconciliation(request: Request):
+@reconciliation_bp.route('', methods=['POST'])
+def start_reconciliation():
     """
     Trigger broker reconciliation.
     
@@ -107,8 +109,8 @@ async def start_reconciliation(request: Request):
         }
 
 
-@reconciliation_router.get('/status')
-async def get_status(request: Request):
+@reconciliation_bp.route('/status', methods=['GET'])
+def get_status():
     """
     Get current reconciliation status.
     
@@ -150,8 +152,8 @@ async def get_status(request: Request):
         }
 
 
-@reconciliation_router.get('/actions')
-async def get_actions(request: Request):
+@reconciliation_bp.route('/actions', methods=['GET'])
+def get_actions():
     """
     Get recent reconciliation actions.
     
@@ -191,9 +193,9 @@ async def get_actions(request: Request):
                 'message': 'Reconciliation service not available'
             }
         # Get filter parameters
-        action_type = request.query_params.get('action_type', None)
-        symbol = request.query_params.get('symbol', None)
-        severity = request.query_params.get('severity', None)
+        action_type = request.args.get('action_type', None)
+        symbol = request.args.get('symbol', None)
+        severity = request.args.get('severity', None)
         
         # Filter actions
         filtered_actions = reconciliation.actions
@@ -227,8 +229,8 @@ async def get_actions(request: Request):
         }
 
 
-@reconciliation_router.get('/health')
-async def health(request: Request):
+@reconciliation_bp.route('/health', methods=['GET'])
+def health():
     """
     Check reconciliation service health.
     

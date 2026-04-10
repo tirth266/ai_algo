@@ -2,17 +2,17 @@
 Dashboard Routes - Real-time Zerodha Account Data
 
 Provides live account information, positions, orders, and P&L from Zerodha Kite Connect.
-Converted from Flask Blueprint to FastAPI APIRouter.
+Flask Blueprint implementation.
 """
 
-from fastapi import APIRouter, Request
+from flask import Blueprint
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-dashboard_bp = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/api/dashboard")
 
 # In-memory cache (2 seconds)
 _cache: Dict[str, Any] = {
@@ -148,8 +148,8 @@ def get_cached_dashboard_data() -> Dict[str, Any]:
         }
 
 
-@dashboard_bp.get("")
-async def get_dashboard(request: Request):
+@dashboard_bp.route("", methods=["GET"])
+def get_dashboard():
     """
     Get real-time dashboard data.
 

@@ -1,16 +1,22 @@
-from fastapi import FastAPI, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Optional, List
+import sys
 import os
-from dotenv import load_dotenv
+from pathlib import Path
+from typing import Optional, List
 import logging
 import uuid
+from dotenv import load_dotenv
+from flask import Flask, jsonify, request
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
-from fastapi.middleware.cors import CORSMiddleware
+from backend.flask_compat import ApiError
 
-
+# Add the backend directory to sys.path to allow imports like 'from api...import...'
+# regardless of whether the app is run from the root or within the backend folder.
+backend_dir = Path(__file__).parent.absolute()
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
 
 from utils.logger import setup_logging
 
@@ -32,45 +38,60 @@ from core.nse_order_validator import validate_nse_order
 from core.execution import TradingSystem, Backtester
 from core.trade_manager import TradeManager
 
-app = FastAPI(title="Angel One Algo Trading API")
+app = Flask(__name__)
 symbol_manager = SymbolManager()
 
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://ai-algo-ul1l.vercel.app"],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-)
+from backend.api.angel_routes import angel_bp
+from backend.api.broker_routes import broker_bp
+from backend.api.journal_routes import journal_bp
+from backend.api.trading_routes import trading_bp
+from backend.routes.dashboard_routes import dashboard_bp
+from backend.routes.reconciliation_routes import reconciliation_bp
+from backend.routes.auth import auth_bp
 
-# Import routers
-from api.angel_routes import angel_router
-from api.broker_routes import broker_router
-from api.journal_routes import journal_router
-from api.trading_routes import trading_router
-from routes.dashboard_routes import dashboard_bp
-from routes.reconciliation_routes import reconciliation_router
-
-# Include routers
-app.include_router(angel_router)
-app.include_router(broker_router)
-app.include_router(journal_router)
-app.include_router(trading_router)
-app.include_router(reconciliation_router)
-app.include_router(dashboard_bp)
+app.register_blueprint(angel_bp)
+app.register_blueprint(broker_bp)
+app.register_blueprint(journal_bp)
+app.register_blueprint(trading_bp)
+app.register_blueprint(reconciliation_bp)
+app.register_blueprint(dashboard_bp)
+app.register_blueprint(auth_bp)
 
 load_dotenv()
 setup_logging(log_level=os.environ.get("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
 
-# Init DB on startup
-@app.on_event("startup")
-def on_startup():
-    init_db()
+@app.after_request
+def apply_cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "https://ai-algo-ul1l.vercel.app"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
 
-    # Start live market data streaming
+
+@app.errorhandler(ApiError)
+def handle_api_error(error):
+    return jsonify({"status": "error", "detail": error.detail}), error.status_code
+
+
+@app.errorhandler(Exception)
+def handle_exception(error):
+    logger.exception("Unhandled exception")
+    status_code = getattr(error, "code", 500)
+    return jsonify({"status": "error", "detail": str(error)}), status_code
+
+
+startup_complete = False
+
+@app.before_request
+def before_request():
+    global startup_complete
+    if startup_complete:
+        return
+
+    init_db()
     try:
         if start_data_manager():
             logger.info("✓ Live market data streaming started")
@@ -79,14 +100,7 @@ def on_startup():
     except Exception as e:
         logger.warning(f"Could not start market data manager: {e}")
 
-
-# DB Dependency
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    startup_complete = True
 
 
 class OrderRequest(BaseModel):
@@ -103,9 +117,12 @@ class ConnectRequest(BaseModel):
     auth_token: str = None
 
 
-@app.post("/api/auth/connect")
-def connect_angel_one(req: ConnectRequest = None):
+@app.route("/api/auth/connect", methods=["POST"])
+def connect_angel_one():
     try:
+        data = request.get_json(silent=True) or {}
+        req = ConnectRequest(**data) if data else ConnectRequest()
+
         if req and req.auth_token:
             service = get_angel_one_service()
             service.token_manager._store_tokens(req.auth_token, None, None)
@@ -114,11 +131,13 @@ def connect_angel_one(req: ConnectRequest = None):
             angel_login()
 
         return {"status": "Success", "message": "Angel One session active."}
+    except ValidationError as exc:
+        raise ApiError(400, str(exc))
     except Exception as exc:
-        raise HTTPException(status_code=401, detail=str(exc))
+        raise ApiError(401, str(exc))
 
 
-@app.get("/api/auth/status")
+@app.route("/api/auth/status", methods=["GET"])
 def check_auth_status():
     service = get_angel_one_service()
     return {
@@ -127,23 +146,31 @@ def check_auth_status():
     }
 
 
-@app.get("/api/prices")
+@app.route("/api/prices", methods=["GET"])
 def get_prices():
     return global_price_store.get_all_prices()
 
 
-@app.post("/api/place-order")
-async def place_order_endpoint(order: OrderRequest, db: Session = Depends(get_db)):
+@app.route("/api/place-order", methods=["POST"])
+def place_order_endpoint():
+    try:
+        payload = request.get_json(silent=True) or {}
+        order = OrderRequest(**payload)
+    except ValidationError as exc:
+        raise ApiError(400, str(exc))
+
     logger.info(f"Received order request: {order}")
+    db = SessionLocal()
 
     # Resolve symbol to token
     token, lot_size = symbol_manager.get_token(order.symbol, order.exchange)
 
     if not token:
+        db.close()
         logger.error(f"Failed to find token for symbol: {order.symbol}")
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid symbol or token not found for {order.symbol}",
+        raise ApiError(
+            400,
+            f"Invalid symbol or token not found for {order.symbol}",
         )
 
     logger.info(f"Resolved {order.symbol} to token: {token}")
@@ -156,9 +183,8 @@ async def place_order_endpoint(order: OrderRequest, db: Session = Depends(get_db
         order.order_type = "LIMIT"
 
     if order.order_type.upper() == "LIMIT" and order.price <= 0:
-        raise HTTPException(
-            status_code=400, detail="LIMIT orders require a specified price > 0."
-        )
+        db.close()
+        raise ApiError(400, "LIMIT orders require a specified price > 0.")
 
     # Get current LTP for validation
     ltp = global_price_store.get_price(token)
@@ -178,12 +204,13 @@ async def place_order_endpoint(order: OrderRequest, db: Session = Depends(get_db
     )
 
     if not nse_validation["valid"]:
+        db.close()
         logger.error(
             f"NSE validation failed for {order.symbol}: {nse_validation['reason']}"
         )
-        raise HTTPException(
-            status_code=400,
-            detail=f"NSE Order Validation Failed: {nse_validation['reason']}",
+        raise ApiError(
+            400,
+            f"NSE Order Validation Failed: {nse_validation['reason']}",
         )
 
     logger.info(f"NSE validation passed: {order.symbol} {order.quantity}@{order.price}")
@@ -192,12 +219,13 @@ async def place_order_endpoint(order: OrderRequest, db: Session = Depends(get_db
     if ltp is not None and order.price > 0:
         difference = abs(order.price - ltp) / ltp
         if difference > 0.05:
+            db.close()
             logger.warning(
                 f"Price validation failed: Order price {order.price} is >5% away from LTP {ltp}"
             )
-            raise HTTPException(
-                status_code=400,
-                detail=f"Safety Check Failed: Order price {order.price} is more than 5% away from LTP {ltp} ({difference * 100:.2f}% disparity).",
+            raise ApiError(
+                400,
+                f"Safety Check Failed: Order price {order.price} is more than 5% away from LTP {ltp} ({difference * 100:.2f}% disparity).",
             )
 
     try:
@@ -228,22 +256,24 @@ async def place_order_endpoint(order: OrderRequest, db: Session = Depends(get_db
                 "ltp_reference": ltp,
             }
         else:
-            raise HTTPException(
-                status_code=400,
-                detail=response.get("message", "Order placement failed"),
+            raise ApiError(
+                400,
+                response.get("message", "Order placement failed"),
             )
 
     except Exception as e:
         logger.error(f"Order error: {e}")
         # Common Angel One error handling e.g., Token Expired
         if "Token Expired" in str(e) or "AB1004" in str(e):
-            raise HTTPException(
-                status_code=401, detail="Session expired. Please relogin to Angel One."
+            raise ApiError(
+                401, "Session expired. Please relogin to Angel One."
             )
-        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+        raise ApiError(500, f"Internal Server Error: {str(e)}")
+    finally:
+        db.close()
 
 
-@app.get("/")
+@app.route("/", methods=["GET"])
 def read_root():
     return {"message": "Angel One Algo Trading Support API Running"}
 
@@ -285,13 +315,16 @@ class TradingOrderRequest(BaseModel):
     confidence: str = "medium"
 
 
-@app.post("/api/trading/start")
-async def start_trading(request: TradingStartRequest = None):
+@app.route("/api/trading/start", methods=["POST"])
+def start_trading():
     """Start the trading system."""
     global _is_running, _trading_system
 
-    if request is None:
-        request = TradingStartRequest()
+    try:
+        payload = request.get_json(silent=True) or {}
+        request_data = TradingStartRequest(**payload) if payload else TradingStartRequest()
+    except ValidationError as exc:
+        raise ApiError(400, str(exc))
 
     if _is_running:
         return {
@@ -300,26 +333,26 @@ async def start_trading(request: TradingStartRequest = None):
         }
 
     _trading_system = TradingSystem(
-        capital=request.capital,
-        risk_per_trade=request.risk_per_trade,
-        max_open_positions=request.max_positions,
-        enable_trailing=request.enable_trailing,
+        capital=request_data.capital,
+        risk_per_trade=request_data.risk_per_trade,
+        max_open_positions=request_data.max_positions,
+        enable_trailing=request_data.enable_trailing,
     )
 
     _is_running = True
 
-    logger.info(f"Trading system started: mode={request.mode}")
+    logger.info(f"Trading system started: mode={request_data.mode}")
 
     return {
         "status": "success",
-        "message": f"Trading system started in {request.mode} mode",
-        "capital": request.capital,
-        "mode": request.mode,
+        "message": f"Trading system started in {request_data.mode} mode",
+        "capital": request_data.capital,
+        "mode": request_data.mode,
     }
 
 
-@app.post("/api/trading/stop")
-async def stop_trading():
+@app.route("/api/trading/stop", methods=["POST"])
+def stop_trading():
     """Stop the trading system."""
     global _is_running
 
@@ -332,8 +365,8 @@ async def stop_trading():
     return {"status": "success", "message": "Trading system stopped"}
 
 
-@app.get("/api/trading/status")
-async def get_trading_status():
+@app.route("/api/trading/status", methods=["GET"])
+def get_trading_status():
     """Get trading system status."""
     global _trading_system, _is_running
 
@@ -348,14 +381,14 @@ async def get_trading_status():
     }
 
 
-@app.get("/api/trading/signals")
-async def get_signals():
+@app.route("/api/trading/signals", methods=["GET"])
+def get_signals():
     """Get recent trading signals."""
     return []  # Populated when signals generated
 
 
-@app.get("/api/trading/trades")
-async def get_trades():
+@app.route("/api/trading/trades", methods=["GET"])
+def get_trades():
     """Get active trades."""
     global _trading_system
 
@@ -365,8 +398,8 @@ async def get_trades():
     return _trading_system.trade_manager.get_open_trades()
 
 
-@app.get("/api/trading/performance")
-async def get_performance():
+@app.route("/api/trading/performance", methods=["GET"])
+def get_performance():
     """Get trading performance metrics."""
     global _trading_system
 
@@ -384,43 +417,59 @@ async def get_performance():
     return _trading_system.trade_manager.get_performance()
 
 
-@app.post("/api/trading/execute")
-async def execute_order(request: TradingOrderRequest):
+@app.route("/api/trading/execute", methods=["POST"])
+def execute_order():
     """Execute an order."""
     global _trading_system
+
+    try:
+        payload = request.get_json(silent=True) or {}
+        request_data = TradingOrderRequest(**payload)
+    except ValidationError as exc:
+        raise ApiError(400, str(exc))
 
     if _trading_system is None:
         _trading_system = get_trading_system()
 
     try:
         trade = _trading_system.trade_manager.open_trade(
-            symbol=request.symbol,
-            direction=request.direction,
-            entry_price=request.entry_price,
-            stop_loss=request.stop_loss,
-            take_profit_1=request.take_profit_1,
-            take_profit_2=request.take_profit_2,
-            quantity=request.quantity,
-            confidence=request.confidence,
-            reason=request.reason,
+            symbol=request_data.symbol,
+            direction=request_data.direction,
+            entry_price=request_data.entry_price,
+            stop_loss=request_data.stop_loss,
+            take_profit_1=request_data.take_profit_1,
+            take_profit_2=request_data.take_profit_2,
+            quantity=request_data.quantity,
+            confidence=request_data.confidence,
+            reason=request_data.reason,
         )
 
         return {
             "status": "success",
             "trade_id": trade.id,
-            "message": f"Order executed: {request.direction} {request.quantity} {request.symbol} @ {request.entry_price}",
+            "message": f"Order executed: {request_data.direction} {request_data.quantity} {request_data.symbol} @ {request_data.entry_price}",
         }
 
     except Exception as e:
         logger.error(f"Order execution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise ApiError(500, str(e))
 
 
-@app.post("/api/trading/backtest")
-async def run_backtest(
-    data: List[dict], initial_capital: float = 100000, risk_per_trade: float = 0.02
-):
+@app.route("/api/trading/backtest", methods=["POST"])
+def run_backtest():
     """Run backtest on historical data."""
+    payload = request.get_json(silent=True)
+
+    if isinstance(payload, list):
+        data = payload
+        initial_capital = float(request.args.get("initial_capital", 100000))
+        risk_per_trade = float(request.args.get("risk_per_trade", 0.02))
+    else:
+        payload = payload or {}
+        data = payload.get("data", [])
+        initial_capital = payload.get("initial_capital", 100000)
+        risk_per_trade = payload.get("risk_per_trade", 0.02)
+
     import pandas as pd
 
     df = pd.DataFrame(data)
@@ -434,17 +483,12 @@ async def run_backtest(
     return results
 
 
-@app.get("/api/health")
-async def health_check():
+@app.route("/api/health", methods=["GET"])
+def health_check():
     """Real system health check endpoint."""
-    try:
-        from backend.services.angelone_service import get_angel_one_service
-        from backend.services.market_data import get_data_manager
-        from backend.core.risk_engine import RiskEngine
-    except ImportError:
-        from services.angelone_service import get_angel_one_service
-        from services.market_data import get_data_manager
-        from core.risk_engine import RiskEngine
+    from services.angelone_service import get_angel_one_service
+    from services.market_data import get_data_manager
+    from core.risk_engine import RiskEngine
 
     health_details = {
         "broker": "unknown",
@@ -516,3 +560,7 @@ async def health_check():
         status = "healthy"
 
     return {"status": status, "details": health_details}
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)
